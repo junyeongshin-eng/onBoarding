@@ -16,6 +16,7 @@ interface WizardProps {
   isFirstStep: boolean;
   onComplete?: () => void;
   isLoading?: boolean;
+  hideNavigation?: boolean;
 }
 
 export function Wizard({
@@ -29,6 +30,7 @@ export function Wizard({
   isFirstStep,
   onComplete,
   isLoading = false,
+  hideNavigation = false,
 }: WizardProps) {
   return (
     <div className="min-h-screen bg-slate-50">
@@ -82,42 +84,44 @@ export function Wizard({
         </div>
 
         {/* Navigation */}
-        <div className="flex justify-between">
-          <button
-            onClick={onBack}
-            disabled={isFirstStep}
-            className={`px-6 py-2.5 rounded-lg font-medium transition-colors ${
-              isFirstStep
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            이전
-          </button>
-          <button
-            onClick={isLastStep ? onComplete : onNext}
-            disabled={!canProgress || isLoading}
-            className={`px-6 py-2.5 rounded-lg font-medium transition-colors ${
-              !canProgress || isLoading
-                ? 'bg-blue-300 text-white cursor-not-allowed'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-          >
-            {isLoading ? (
-              <span className="flex items-center gap-2">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                파일 생성 중...
-              </span>
-            ) : isLastStep ? (
-              '파일 생성'
-            ) : (
-              '계속'
-            )}
-          </button>
-        </div>
+        {!hideNavigation && (
+          <div className="flex justify-between">
+            <button
+              onClick={onBack}
+              disabled={isFirstStep}
+              className={`px-6 py-2.5 rounded-lg font-medium transition-colors ${
+                isFirstStep
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              이전
+            </button>
+            <button
+              onClick={isLastStep ? onComplete : onNext}
+              disabled={!canProgress || isLoading}
+              className={`px-6 py-2.5 rounded-lg font-medium transition-colors ${
+                !canProgress || isLoading
+                  ? 'bg-blue-300 text-white cursor-not-allowed'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+            >
+              {isLoading ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  검사 중...
+                </span>
+              ) : isLastStep ? (
+                '데이터 검사'
+              ) : (
+                '계속'
+              )}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

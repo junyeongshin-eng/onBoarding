@@ -1,6 +1,8 @@
-import type { UploadResponse, ObjectType, ObjectFieldsResponse, ImportRequest, ImportResponse } from '../types';
+import type { UploadResponse, ObjectType, ObjectFieldsResponse, ImportRequest, ImportResponse, ValidationResult, AutoMapResponse, DuplicateDetectionResponse, FieldMapping, ApiKeyValidationResponse, FetchFieldsResponse } from '../types';
 
-const API_BASE = '/api';
+// In development, Vite proxy handles /api -> localhost:8000
+// In production, use the VITE_API_URL environment variable
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 export async function uploadFile(file: File): Promise<UploadResponse & { data: Record<string, unknown>[] }> {
   const formData = new FormData();
@@ -56,11 +58,10 @@ export async function getCRMFields(objectType: string): Promise<ObjectFieldsResp
   return response.json();
 }
 
-export async function importData(request: ImportRequest): Promise<ImportResponse> {
-  // First, validate with preview endpoint
-  let previewResponse: Response;
+export async function validateImport(request: ImportRequest): Promise<ValidationResult> {
+  let response: Response;
   try {
-    previewResponse = await fetch(`${API_BASE}/import/preview`, {
+    response = await fetch(`${API_BASE}/import/validate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -71,9 +72,9 @@ export async function importData(request: ImportRequest): Promise<ImportResponse
     throw new Error('서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인하세요.');
   }
 
-  if (!previewResponse.ok) {
+  if (!response.ok) {
     let errorMessage = '검증 실패';
-    const text = await previewResponse.text();
+    const text = await response.text();
     if (text) {
       try {
         const error = JSON.parse(text);
@@ -85,23 +86,23 @@ export async function importData(request: ImportRequest): Promise<ImportResponse
     throw new Error(errorMessage);
   }
 
-  const previewText = await previewResponse.text();
-  if (!previewText) {
+  const responseText = await response.text();
+  if (!responseText) {
     throw new Error('서버에서 빈 응답을 받았습니다');
   }
 
-  let preview: ImportResponse;
   try {
-    preview = JSON.parse(previewText) as ImportResponse;
+    return JSON.parse(responseText) as ValidationResult;
   } catch {
     throw new Error('서버 응답을 파싱할 수 없습니다');
   }
+}
 
-  // If validation failed, return the errors
-  if (!preview.success) {
-    return preview;
-  }
-
+export async function importData(request: ImportRequest, validRowIndices?: number[]): Promise<ImportResponse> {
+  // Filter data if validRowIndices is provided
+  const filteredRequest = validRowIndices
+    ? { ...request, data: request.data.filter((_, idx) => validRowIndices.includes(idx)) }
+    : request;
   // Generate and download the Excel file
   let response: Response;
   try {
@@ -110,7 +111,7 @@ export async function importData(request: ImportRequest): Promise<ImportResponse
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify(filteredRequest),
     });
   } catch (e) {
     throw new Error('파일 생성 중 서버 연결 오류가 발생했습니다');
@@ -154,7 +155,126 @@ export async function importData(request: ImportRequest): Promise<ImportResponse
 
   return {
     success: true,
-    imported_count: preview.imported_count,
+    imported_count: filteredRequest.data.length,
     errors: [],
   };
+}
+
+export interface AvailableField {
+  key: string;
+  id: string;
+  label: string;
+  object_type: string;
+  description?: string;
+}
+
+export async function autoMapFields(
+  sourceColumns: string[],
+  sampleData: Record<string, unknown>[],
+  targetObjectTypes: string[],
+  availableFields?: AvailableField[]
+): Promise<AutoMapResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/import/auto-map`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        source_columns: sourceColumns,
+        sample_data: sampleData,
+        target_object_types: targetObjectTypes,
+        available_fields: availableFields,
+      }),
+    });
+  } catch (e) {
+    throw new Error('AI 자동 매핑 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('AI 자동 매핑 실패');
+  }
+
+  return response.json();
+}
+
+export async function detectDuplicates(
+  data: Record<string, unknown>[],
+  fieldMappings: FieldMapping[],
+  useAi: boolean = false,
+  threshold: number = 0.85
+): Promise<DuplicateDetectionResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/import/detect-duplicates`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data,
+        field_mappings: fieldMappings,
+        use_ai: useAi,
+        threshold,
+      }),
+    });
+  } catch (e) {
+    throw new Error('중복 감지 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('중복 감지 실패');
+  }
+
+  return response.json();
+}
+
+// Salesmap API Integration
+export async function validateSalesmapApiKey(apiKey: string): Promise<ApiKeyValidationResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/salesmap/validate-key`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+  } catch (e) {
+    throw new Error('서버에 연결할 수 없습니다');
+  }
+
+  if (!response.ok) {
+    throw new Error('API 키 검증 실패');
+  }
+
+  return response.json();
+}
+
+export async function fetchSalesmapFields(
+  apiKey: string,
+  objectTypes: string[]
+): Promise<FetchFieldsResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/salesmap/fetch-fields`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        api_key: apiKey,
+        object_types: objectTypes,
+      }),
+    });
+  } catch (e) {
+    throw new Error('필드 조회 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('필드 조회 실패');
+  }
+
+  return response.json();
 }

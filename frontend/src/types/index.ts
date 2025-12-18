@@ -50,6 +50,23 @@ export interface ImportResponse {
   errors: string[];
 }
 
+export interface ValidationError {
+  row: number;
+  field: string;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+export interface ValidationResult {
+  success: boolean;
+  total_rows: number;
+  valid_rows: number;
+  error_count: number;
+  warning_count: number;
+  errors: ValidationError[];
+  valid_row_indices: number[];
+}
+
 export interface OnboardingState {
   step: number;
   uploadedFile: UploadResponse | null;
@@ -57,4 +74,59 @@ export interface OnboardingState {
   selectedObjectTypes: string[];
   fieldMappings: FieldMapping[];
   customFields: ExtendedCRMField[];
+}
+
+// AI-related types
+export interface AutoMapResponse {
+  mappings: Record<string, string | null>;
+  confidence: Record<string, number>;
+  error?: string;
+}
+
+export interface DuplicateRecord {
+  row1: number;
+  row2: number;
+  similarity: number;
+  field_similarities: Record<string, number>;
+  data1: Record<string, string>;
+  data2: Record<string, string>;
+  ai_analysis?: {
+    is_duplicate: boolean;
+    confidence: number;
+    reason: string;
+  };
+}
+
+export interface DuplicateDetectionResponse {
+  duplicates: DuplicateRecord[];
+  total_checked: number;
+}
+
+// Salesmap API types
+export interface ApiKeyValidationResponse {
+  valid: boolean;
+  message: string;
+}
+
+export interface SalesmapField {
+  id: string;
+  label: string;
+  type: string;
+  required: boolean;
+  is_system: boolean;
+  is_custom: boolean;
+}
+
+export interface ObjectFieldsResult {
+  object_type: string;
+  object_name: string;
+  success: boolean;
+  fields: SalesmapField[];
+  error?: string;
+  warning?: string;
+}
+
+export interface FetchFieldsResponse {
+  success: boolean;
+  results: ObjectFieldsResult[];
 }

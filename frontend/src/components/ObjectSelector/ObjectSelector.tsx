@@ -1,11 +1,13 @@
 import type { ReactNode } from 'react';
 import { useState, useEffect } from 'react';
 import { getObjectTypes } from '../../services/api';
-import type { ObjectType } from '../../types';
+import type { ObjectType, SalesmapField } from '../../types';
 
 interface ObjectSelectorProps {
   selectedTypes: string[];
   onSelect: (types: string[]) => void;
+  salesmapFields?: Record<string, SalesmapField[]>;
+  isFetchingFields?: boolean;
 }
 
 const ICONS: Record<string, ReactNode> = {
@@ -31,7 +33,7 @@ const ICONS: Record<string, ReactNode> = {
   ),
 };
 
-export function ObjectSelector({ selectedTypes, onSelect }: ObjectSelectorProps) {
+export function ObjectSelector({ selectedTypes, onSelect, salesmapFields = {}, isFetchingFields = false }: ObjectSelectorProps) {
   const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -48,6 +50,12 @@ export function ObjectSelector({ selectedTypes, onSelect }: ObjectSelectorProps)
     } else {
       onSelect([...selectedTypes, typeId]);
     }
+  };
+
+  // Get field count for an object type (excluding system fields)
+  const getFieldCount = (typeId: string) => {
+    const fields = salesmapFields[typeId] || [];
+    return fields.filter(f => !f.is_system).length;
   };
 
   if (isLoading) {
@@ -70,6 +78,8 @@ export function ObjectSelector({ selectedTypes, onSelect }: ObjectSelectorProps)
       <div className="grid grid-cols-2 gap-4">
         {objectTypes.map((type) => {
           const isSelected = selectedTypes.includes(type.id);
+          const fieldCount = getFieldCount(type.id);
+          const hasFields = fieldCount > 0;
           return (
             <button
               key={type.id}
@@ -98,6 +108,35 @@ export function ObjectSelector({ selectedTypes, onSelect }: ObjectSelectorProps)
                 </div>
               </div>
               <p className="text-sm text-slate-500">{type.description}</p>
+
+              {/* Show field status for selected objects */}
+              {isSelected && (
+                <div className="mt-3 pt-3 border-t border-blue-200">
+                  {isFetchingFields ? (
+                    <div className="flex items-center gap-2 text-sm text-blue-600">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <span>필드 조회 중...</span>
+                    </div>
+                  ) : hasFields ? (
+                    <div className="flex items-center gap-2 text-sm text-green-600">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>{fieldCount}개 필드 조회됨</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm text-amber-600">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span>기본 필드 사용</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </button>
           );
         })}
@@ -109,6 +148,44 @@ export function ObjectSelector({ selectedTypes, onSelect }: ObjectSelectorProps)
             <span className="font-medium">{selectedTypes.length}개 오브젝트 선택됨:</span>{' '}
             {selectedTypes.map((t) => objectTypes.find((o) => o.id === t)?.name).join(', ')}
           </p>
+        </div>
+      )}
+
+      {/* Required fields info */}
+      {selectedTypes.length > 0 && (
+        <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+          <h4 className="font-medium text-amber-800 mb-3 flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            오브젝트별 필수 입력 조건
+          </h4>
+          <div className="space-y-2 text-sm">
+            {selectedTypes.includes('company') && (
+              <div className="flex items-start gap-2 text-amber-700">
+                <span className="font-medium min-w-[60px]">회사:</span>
+                <span>'이름' 필드 필수 (헤더: <code className="bg-amber-100 px-1 rounded">Organization - 이름</code>)</span>
+              </div>
+            )}
+            {selectedTypes.includes('contact') && (
+              <div className="flex items-start gap-2 text-amber-700">
+                <span className="font-medium min-w-[60px]">고객:</span>
+                <span>'이름' 필드 필수 (헤더: <code className="bg-amber-100 px-1 rounded">People - 이름</code>)</span>
+              </div>
+            )}
+            {selectedTypes.includes('lead') && (
+              <div className="flex items-start gap-2 text-amber-700">
+                <span className="font-medium min-w-[60px]">리드:</span>
+                <span>고객(People) 또는 회사(Organization) 중 하나 반드시 연결 필요</span>
+              </div>
+            )}
+            {selectedTypes.includes('deal') && (
+              <div className="flex items-start gap-2 text-amber-700">
+                <span className="font-medium min-w-[60px]">딜:</span>
+                <span>고객(People) 또는 회사(Organization) 중 하나 반드시 연결 필요</span>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

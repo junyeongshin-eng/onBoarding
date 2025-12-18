@@ -11,10 +11,10 @@ class SalesmapClient:
 
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         self.api_key = api_key or "placeholder_api_key"
-        self.base_url = base_url or "https://api.salesmap.com/v1"
+        self.base_url = base_url or "https://salesmap.kr/api/v2"
         self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
         }
 
     async def import_contacts(self, contacts: list[dict]) -> dict:

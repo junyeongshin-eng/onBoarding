@@ -90,6 +90,23 @@ class ImportRequest(BaseModel):
     custom_fields: list[CustomField] = []  # User-created custom fields
 
 
+class ValidationError(BaseModel):
+    row: int
+    field: str
+    message: str
+    severity: str  # "error" or "warning"
+
+
+class ValidationResult(BaseModel):
+    success: bool
+    total_rows: int
+    valid_rows: int
+    error_count: int
+    warning_count: int
+    errors: list[ValidationError]
+    valid_row_indices: list[int]  # Indices of rows that passed validation
+
+
 class ImportResponse(BaseModel):
     success: bool
     imported_count: int
@@ -253,6 +270,240 @@ async def preview_import(request: ImportRequest):
     )
 
 
+import re
+from datetime import datetime
+
+def validate_date(value: str) -> bool:
+    """Validate date format YYYY-MM-DD"""
+    if not value:
+        return True
+    patterns = [
+        r'^\d{4}-\d{2}-\d{2}$',
+        r'^\d{4}/\d{2}/\d{2}$',
+        r'^\d{4}\.\d{2}\.\d{2}$',
+    ]
+    return any(re.match(p, str(value)) for p in patterns)
+
+
+def validate_datetime(value: str) -> bool:
+    """Validate datetime format YYYY-MM-DD HH:mm"""
+    if not value:
+        return True
+    patterns = [
+        r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$',
+        r'^\d{4}/\d{2}/\d{2} \d{2}:\d{2}$',
+        r'^\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}$',
+    ]
+    return any(re.match(p, str(value)) for p in patterns)
+
+
+def validate_email(value: str) -> bool:
+    """Validate email format"""
+    if not value:
+        return True
+    return bool(re.match(r'^[^@]+@[^@]+\.[^@]+$', str(value)))
+
+
+def validate_number(value) -> bool:
+    """Validate number format"""
+    if value is None or value == '':
+        return True
+    try:
+        float(str(value).replace(',', ''))
+        return True
+    except:
+        return False
+
+
+def validate_boolean(value: str) -> bool:
+    """Validate boolean format"""
+    if not value:
+        return True
+    return str(value).upper() in ['TRUE', 'FALSE', '1', '0', 'YES', 'NO']
+
+
+@router.post("/import/validate", response_model=ValidationResult)
+async def validate_import(request: ImportRequest):
+    """
+    Validate import data row by row.
+    Returns detailed validation results with errors and warnings.
+    """
+    validation_errors: list[ValidationError] = []
+    valid_row_indices: list[int] = []
+
+    # Build mapping lookup: source_column -> (object_type, field_id, field_info)
+    field_lookup: dict[str, tuple] = {}
+    for mapping in request.field_mappings:
+        parts = mapping.target_field.split(".")
+        if len(parts) == 2:
+            obj_type, field_id = parts
+            # Find field info from OBJECT_FIELDS
+            field_info = None
+            if obj_type in OBJECT_FIELDS:
+                for f in OBJECT_FIELDS[obj_type]["fields"]:
+                    if f["id"] == field_id:
+                        field_info = f
+                        break
+            # Check custom fields
+            if not field_info:
+                for cf in request.custom_fields:
+                    if cf.objectType == obj_type and cf.id == field_id:
+                        field_info = {"id": cf.id, "label": cf.label, "type": cf.type, "required": False}
+                        break
+            field_lookup[mapping.source_column] = (obj_type, field_id, field_info)
+
+    # Track unique values for duplicate detection
+    unique_values: dict[str, set] = {}
+
+    # Validate each row
+    for row_idx, row in enumerate(request.data, start=1):
+        row_has_error = False
+
+        # Check each mapped field
+        for source_col, (obj_type, field_id, field_info) in field_lookup.items():
+            value = row.get(source_col)
+            field_label = field_info["label"] if field_info else field_id
+
+            if not field_info:
+                continue
+
+            field_type = field_info.get("type", "text")
+            is_required = field_info.get("required", False)
+            is_unique = field_info.get("unique", False)
+
+            # Required field validation
+            if is_required and (value is None or str(value).strip() == ''):
+                validation_errors.append(ValidationError(
+                    row=row_idx,
+                    field=field_label,
+                    message=f"'{field_label}' 필드는 필수입니다",
+                    severity="error"
+                ))
+                row_has_error = True
+                continue
+
+            # Skip further validation if value is empty
+            if value is None or str(value).strip() == '':
+                continue
+
+            str_value = str(value).strip()
+
+            # Type-specific validation
+            if field_type == "date" and not validate_date(str_value):
+                validation_errors.append(ValidationError(
+                    row=row_idx,
+                    field=field_label,
+                    message=f"날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)",
+                    severity="error"
+                ))
+                row_has_error = True
+
+            elif field_type == "datetime" and not validate_datetime(str_value):
+                validation_errors.append(ValidationError(
+                    row=row_idx,
+                    field=field_label,
+                    message=f"날짜/시간 형식이 올바르지 않습니다 (YYYY-MM-DD HH:mm)",
+                    severity="error"
+                ))
+                row_has_error = True
+
+            elif field_type == "email" and not validate_email(str_value):
+                validation_errors.append(ValidationError(
+                    row=row_idx,
+                    field=field_label,
+                    message=f"이메일 형식이 올바르지 않습니다",
+                    severity="error"
+                ))
+                row_has_error = True
+
+            elif field_type == "number" and not validate_number(str_value):
+                validation_errors.append(ValidationError(
+                    row=row_idx,
+                    field=field_label,
+                    message=f"숫자 형식이 올바르지 않습니다",
+                    severity="error"
+                ))
+                row_has_error = True
+
+            elif field_type == "boolean" and not validate_boolean(str_value):
+                validation_errors.append(ValidationError(
+                    row=row_idx,
+                    field=field_label,
+                    message=f"TRUE 또는 FALSE만 입력 가능합니다",
+                    severity="error"
+                ))
+                row_has_error = True
+
+            # Unique value validation
+            if is_unique and str_value:
+                unique_key = f"{obj_type}.{field_id}"
+                if unique_key not in unique_values:
+                    unique_values[unique_key] = set()
+
+                if str_value.lower() in unique_values[unique_key]:
+                    validation_errors.append(ValidationError(
+                        row=row_idx,
+                        field=field_label,
+                        message=f"중복된 값입니다: {str_value}",
+                        severity="warning"
+                    ))
+                else:
+                    unique_values[unique_key].add(str_value.lower())
+
+        # Check Lead/Deal connection requirement
+        if "lead" in request.object_types or "deal" in request.object_types:
+            has_people = any(
+                m.target_field.startswith("contact.") for m in request.field_mappings
+            )
+            has_org = any(
+                m.target_field.startswith("company.") for m in request.field_mappings
+            )
+
+            if not has_people and not has_org:
+                # Check if there's data for people or org in the row
+                people_value = None
+                org_value = None
+                for source_col, (obj_type, field_id, _) in field_lookup.items():
+                    if obj_type == "contact":
+                        people_value = row.get(source_col)
+                    elif obj_type == "company":
+                        org_value = row.get(source_col)
+
+                if not people_value and not org_value:
+                    if "lead" in request.object_types:
+                        validation_errors.append(ValidationError(
+                            row=row_idx,
+                            field="연결",
+                            message="리드는 고객 또는 회사 중 하나는 반드시 입력해야 합니다",
+                            severity="error"
+                        ))
+                        row_has_error = True
+                    if "deal" in request.object_types:
+                        validation_errors.append(ValidationError(
+                            row=row_idx,
+                            field="연결",
+                            message="딜은 고객 또는 회사 중 하나는 반드시 입력해야 합니다",
+                            severity="error"
+                        ))
+                        row_has_error = True
+
+        if not row_has_error:
+            valid_row_indices.append(row_idx - 1)  # Store 0-indexed
+
+    error_count = len([e for e in validation_errors if e.severity == "error"])
+    warning_count = len([e for e in validation_errors if e.severity == "warning"])
+
+    return ValidationResult(
+        success=error_count == 0,
+        total_rows=len(request.data),
+        valid_rows=len(valid_row_indices),
+        error_count=error_count,
+        warning_count=warning_count,
+        errors=validation_errors,
+        valid_row_indices=valid_row_indices
+    )
+
+
 # Salesmap Object Fields based on documentation
 OBJECT_FIELDS = {
     "company": {
@@ -319,6 +570,127 @@ OBJECT_FIELDS = {
 }
 
 
+# AI-powered endpoints
+from app.services.ai_service import auto_map_fields, detect_duplicates, ai_detect_duplicates
+
+
+class AvailableField(BaseModel):
+    key: str  # e.g., "contact.name"
+    id: str
+    label: str
+    object_type: str
+    description: Optional[str] = None
+
+
+class AutoMapRequest(BaseModel):
+    source_columns: list[str]
+    sample_data: list[dict]
+    target_object_types: list[str]
+    available_fields: Optional[list[AvailableField]] = None
+
+
+class AutoMapResponse(BaseModel):
+    mappings: dict[str, Optional[str]]
+    confidence: dict[str, float]
+    error: Optional[str] = None
+
+
+class DuplicateDetectionRequest(BaseModel):
+    data: list[dict]
+    field_mappings: list[FieldMapping]
+    use_ai: bool = False
+    threshold: float = 0.85
+
+
+class DuplicateRecord(BaseModel):
+    row1: int
+    row2: int
+    similarity: float
+    field_similarities: dict[str, float]
+    data1: dict[str, str]
+    data2: dict[str, str]
+    ai_analysis: Optional[dict] = None
+
+
+class DuplicateDetectionResponse(BaseModel):
+    duplicates: list[DuplicateRecord]
+    total_checked: int
+
+
+@router.post("/import/auto-map", response_model=AutoMapResponse)
+async def auto_map_endpoint(request: AutoMapRequest):
+    """
+    Use AI to automatically suggest field mappings based on column names and sample data.
+    """
+    try:
+        # Convert available_fields to dict format for AI service
+        available_fields_dict = None
+        if request.available_fields:
+            available_fields_dict = [
+                {
+                    "key": f.key,
+                    "id": f.id,
+                    "label": f.label,
+                    "object_type": f.object_type,
+                    "description": f.description or f.label
+                }
+                for f in request.available_fields
+            ]
+
+        result = await auto_map_fields(
+            source_columns=request.source_columns,
+            sample_data=request.sample_data,
+            target_object_types=request.target_object_types,
+            available_fields=available_fields_dict
+        )
+        return AutoMapResponse(
+            mappings=result.get("mappings", {}),
+            confidence=result.get("confidence", {}),
+            error=result.get("error")
+        )
+    except Exception as e:
+        return AutoMapResponse(
+            mappings={},
+            confidence={},
+            error=str(e)
+        )
+
+
+@router.post("/import/detect-duplicates", response_model=DuplicateDetectionResponse)
+async def detect_duplicates_endpoint(request: DuplicateDetectionRequest):
+    """
+    Detect potential duplicate records in the data.
+    """
+    try:
+        field_mappings_dict = [
+            {"source_column": m.source_column, "target_field": m.target_field}
+            for m in request.field_mappings
+        ]
+
+        if request.use_ai:
+            duplicates = await ai_detect_duplicates(
+                data=request.data,
+                field_mappings=field_mappings_dict,
+                sample_size=100
+            )
+        else:
+            duplicates = await detect_duplicates(
+                data=request.data,
+                field_mappings=field_mappings_dict,
+                threshold=request.threshold
+            )
+
+        return DuplicateDetectionResponse(
+            duplicates=[DuplicateRecord(**d) for d in duplicates],
+            total_checked=len(request.data)
+        )
+    except Exception as e:
+        return DuplicateDetectionResponse(
+            duplicates=[],
+            total_checked=0
+        )
+
+
 @router.get("/object-types")
 def get_object_types():
     """Get available object types for import"""
@@ -339,3 +711,99 @@ def get_crm_fields(object_type: str):
         raise HTTPException(status_code=400, detail="잘못된 오브젝트 타입입니다")
 
     return OBJECT_FIELDS[object_type]
+
+
+# ============================================
+# Salesmap API Integration Endpoints
+# ============================================
+
+from app.services.salesmap_service import validate_api_key, fetch_object_fields
+
+
+class ApiKeyValidationRequest(BaseModel):
+    api_key: str
+
+
+class ApiKeyValidationResponse(BaseModel):
+    valid: bool
+    message: str
+
+
+class FetchFieldsRequest(BaseModel):
+    api_key: str
+    object_types: list[str]
+
+
+class FieldInfo(BaseModel):
+    id: str
+    label: str
+    type: str
+    required: bool
+    is_system: bool
+    is_custom: bool = False
+
+
+class ObjectFieldsResult(BaseModel):
+    object_type: str
+    object_name: str
+    success: bool
+    fields: list[FieldInfo]
+    error: Optional[str] = None
+    warning: Optional[str] = None
+
+
+class FetchFieldsResponse(BaseModel):
+    success: bool
+    results: list[ObjectFieldsResult]
+
+
+@router.post("/salesmap/validate-key", response_model=ApiKeyValidationResponse)
+async def validate_salesmap_key(request: ApiKeyValidationRequest):
+    """
+    Validate a Salesmap API key.
+    """
+    print(f"[Route] /salesmap/validate-key 호출됨")
+    print(f"[Route] API Key 길이: {len(request.api_key)}")
+    result = await validate_api_key(request.api_key)
+    print(f"[Route] 결과: {result}")
+    return ApiKeyValidationResponse(
+        valid=result["valid"],
+        message=result["message"]
+    )
+
+
+@router.post("/salesmap/fetch-fields", response_model=FetchFieldsResponse)
+async def fetch_salesmap_fields(request: FetchFieldsRequest):
+    """
+    Fetch available fields from Salesmap for the specified object types.
+    """
+    print(f"[Route] /salesmap/fetch-fields 호출됨")
+    print(f"[Route] Object Types: {request.object_types}")
+    results = []
+
+    for obj_type in request.object_types:
+        result = await fetch_object_fields(request.api_key, obj_type)
+
+        fields = [
+            FieldInfo(
+                id=f["id"],
+                label=f["label"],
+                type=f["type"],
+                required=f["required"],
+                is_system=f.get("is_system", False),
+                is_custom=f.get("is_custom", False)
+            )
+            for f in result.get("fields", [])
+        ]
+
+        results.append(ObjectFieldsResult(
+            object_type=obj_type,
+            object_name=result.get("object_name", obj_type),
+            success=result.get("success", False),
+            fields=fields,
+            error=result.get("error"),
+            warning=result.get("warning")
+        ))
+
+    all_success = all(r.success for r in results)
+    return FetchFieldsResponse(success=all_success, results=results)
