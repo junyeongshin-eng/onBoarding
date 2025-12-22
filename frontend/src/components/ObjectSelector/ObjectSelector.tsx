@@ -8,6 +8,7 @@ interface ObjectSelectorProps {
   onSelect: (types: string[]) => void;
   salesmapFields?: Record<string, SalesmapField[]>;
   isFetchingFields?: boolean;
+  recommendedTypes?: string[];
 }
 
 const ICONS: Record<string, ReactNode> = {
@@ -33,7 +34,7 @@ const ICONS: Record<string, ReactNode> = {
   ),
 };
 
-export function ObjectSelector({ selectedTypes, onSelect, salesmapFields = {}, isFetchingFields = false }: ObjectSelectorProps) {
+export function ObjectSelector({ selectedTypes, onSelect, salesmapFields = {}, isFetchingFields = false, recommendedTypes = [] }: ObjectSelectorProps) {
   const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -78,21 +79,30 @@ export function ObjectSelector({ selectedTypes, onSelect, salesmapFields = {}, i
       <div className="grid grid-cols-2 gap-4">
         {objectTypes.map((type) => {
           const isSelected = selectedTypes.includes(type.id);
+          const isRecommended = recommendedTypes.includes(type.id);
           const fieldCount = getFieldCount(type.id);
           const hasFields = fieldCount > 0;
           return (
             <button
               key={type.id}
               onClick={() => toggleType(type.id)}
-              className={`p-5 text-left rounded-xl border-2 transition-all ${
+              className={`relative p-5 text-left rounded-xl border-2 transition-all ${
                 isSelected
                   ? 'border-blue-500 bg-blue-50'
+                  : isRecommended
+                  ? 'border-green-300 bg-green-50/50 hover:border-green-400'
                   : 'border-slate-200 hover:border-slate-300 bg-white'
               }`}
             >
+              {/* Recommended badge */}
+              {isRecommended && (
+                <span className="absolute top-2 right-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                  추천
+                </span>
+              )}
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${isSelected ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
+                  <div className={`p-2 rounded-lg ${isSelected ? 'bg-blue-100 text-blue-600' : isRecommended ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
                     {ICONS[type.id]}
                   </div>
                   <h4 className="text-lg font-semibold text-slate-800">{type.name}</h4>

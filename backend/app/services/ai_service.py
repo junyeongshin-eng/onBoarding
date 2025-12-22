@@ -257,6 +257,119 @@ async def detect_duplicates(
     return duplicates[:50]  # Limit to top 50 duplicates
 
 
+async def consulting_chat(
+    messages: list[dict],
+    is_summary_request: bool = False,
+    file_context: dict = None
+) -> dict:
+    """
+    AI-powered consulting chat for B2B CRM data import.
+
+    Args:
+        messages: Chat history with role and content
+        is_summary_request: Whether to generate a summary
+        file_context: Optional file information (filename, columns, sample_data, total_rows)
+
+    Returns:
+        AI response with message and optional recommendations
+    """
+    system_prompt = """당신은 B2B 영업 CRM 데이터 가져오기를 도와주는 전문 컨설턴트입니다.
+사용자가 어떤 데이터를 관리하고 있는지 파악하여 세일즈맵 CRM에 최적의 설정을 추천해야 합니다.
+
+## 세일즈맵 CRM 구조
+
+세일즈맵에는 4가지 오브젝트만 존재합니다:
+- company (회사): 거래처, 파트너사, 고객사 등 B2B 회사 정보
+- contact (고객): 담당자, 연락처, 의사결정자 등 개인 정보
+- lead (리드): 영업 기회, 잠재 거래, 문의 등
+- deal (딜): 실제 거래, 계약, 수주 정보
+
+각 오브젝트에는 커스텀 필드를 추가할 수 있습니다.
+메모나 노트는 각 오브젝트의 '노트' 기능에 저장하면 됩니다 (별도 필드 불필요).
+
+## 기본 필드 예시
+- company: 회사명, 업종, 직원수, 주소, 웹사이트, 담당자
+- contact: 이름, 이메일, 전화번호, 직책, 소속회사, 담당자
+- lead: 리드명, 상태, 예상금액, 파이프라인, 담당자
+- deal: 딜명, 상태, 금액, 마감일, 파이프라인, 구독정보(MRR)
+
+## 대화 규칙
+- 친절하고 전문적으로 대화하세요
+- 짧고 명확하게 답변하세요
+- 한 번에 하나의 질문만 하세요
+- 이모지를 적절히 사용해 친근하게 대화하세요
+- 사용자가 메모/노트를 언급하면 각 오브젝트의 노트 기능을 안내하세요"""
+
+    # Add file context to system prompt if available
+    if file_context:
+        file_info = f"""
+
+## 업로드된 파일 정보
+- 파일명: {file_context.get('filename', '알 수 없음')}
+- 총 행 수: {file_context.get('total_rows', 0)}개
+- 컬럼 목록: {', '.join(file_context.get('columns', []))}
+
+### 샘플 데이터 (처음 3행)
+"""
+        sample_data = file_context.get('sample_data', [])[:3]
+        for i, row in enumerate(sample_data, 1):
+            row_str = ', '.join([f"{k}: {v}" for k, v in list(row.items())[:5]])  # First 5 columns
+            file_info += f"{i}. {row_str}\n"
+
+        file_info += """
+이 파일 데이터를 분석하여 어떤 오브젝트와 필드가 필요한지 파악하세요.
+컬럼명과 샘플 데이터를 보고 적절한 매핑을 추천해주세요."""
+
+        system_prompt += file_info
+
+    if is_summary_request:
+        system_prompt += """
+
+## 요약 요청
+이제 대화 내용을 바탕으로 추천 사항을 정리해주세요.
+
+추천할 수 있는 오브젝트: company, contact, lead, deal (이 4가지만 존재)
+메모/노트는 별도 필드가 아니라 각 오브젝트의 노트 기능 사용을 안내하세요.
+파일이 업로드된 경우, 컬럼명을 분석하여 구체적인 필드 매핑을 추천하세요.
+
+반드시 아래 JSON 형식으로만 응답하세요:
+{
+  "summary": "대화 내용 요약 (2-3문장)",
+  "recommended_objects": ["company", "contact", "lead", "deal 중 해당하는 것들"],
+  "recommended_fields": [
+    {"object_type": "오브젝트타입", "field_id": "영문필드ID", "field_label": "한글필드명", "reason": "추천 이유"}
+  ],
+  "confirmation_message": "사용자에게 확인 요청하는 메시지"
+}"""
+
+    try:
+        openai_client = get_openai_client()
+
+        api_messages = [{"role": "system", "content": system_prompt}]
+        api_messages.extend(messages)
+
+        response_format = {"type": "json_object"} if is_summary_request else None
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=api_messages,
+            temperature=0.7,
+            max_tokens=1000,
+            response_format=response_format
+        )
+
+        content = response.choices[0].message.content
+
+        if is_summary_request:
+            return {"type": "summary", "data": json.loads(content)}
+        else:
+            return {"type": "message", "content": content}
+
+    except Exception as e:
+        print(f"Consulting chat error: {e}")
+        return {"type": "error", "content": f"AI 응답 오류: {str(e)}"}
+
+
 async def ai_detect_duplicates(
     data: list[dict],
     field_mappings: list[dict],

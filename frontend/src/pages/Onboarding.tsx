@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Wizard } from '../components/Wizard/Wizard';
+import ConsultingStep from '../components/Wizard/ConsultingStep';
 import { ApiKeyStep } from '../components/Wizard/ApiKeyStep';
 import { FileUpload } from '../components/FileUpload/FileUpload';
 import { ObjectSelector } from '../components/ObjectSelector/ObjectSelector';
@@ -8,9 +9,10 @@ import { ReviewStep } from '../components/Review/ReviewStep';
 import { SuccessStep } from '../components/Review/SuccessStep';
 import { ValidationResultPanel } from '../components/Review/ValidationResultPanel';
 import { importData, validateImport, detectDuplicates, fetchSalesmapFields } from '../services/api';
-import type { UploadResponse, FieldMapping, ImportResponse, ExtendedCRMField, ValidationResult, DuplicateRecord, SalesmapField } from '../types';
+import type { UploadResponse, FieldMapping, ImportResponse, ExtendedCRMField, ValidationResult, DuplicateRecord, SalesmapField, ConsultingResult } from '../types';
 
 const STEPS = [
+  { title: '컨설팅', description: '데이터 관리 방식을 알려주세요' },
   { title: 'API 연결', description: '세일즈맵 API Key를 입력하세요' },
   { title: '오브젝트 선택', description: '가져올 데이터 유형을 선택하세요' },
   { title: '파일 업로드', description: 'CSV 또는 Excel 파일을 업로드하세요' },
@@ -21,6 +23,9 @@ const STEPS = [
 
 export function Onboarding() {
   const [currentStep, setCurrentStep] = useState(0);
+  // Consulting state
+  const [consultingResult, setConsultingResult] = useState<ConsultingResult | null>(null);
+  const [isConsultingComplete, setIsConsultingComplete] = useState(false);
   // API Key state
   const [apiKey, setApiKey] = useState('');
   const [isApiKeyValidated, setIsApiKeyValidated] = useState(false);
@@ -87,20 +92,46 @@ export function Onboarding() {
     }
   }, [apiKey]);
 
+  const handleConsultingComplete = useCallback((
+    result: ConsultingResult,
+    fileDataFromConsulting?: { uploadResponse: UploadResponse; data: Record<string, unknown>[] }
+  ) => {
+    setConsultingResult(result);
+    setIsConsultingComplete(true);
+    // Pre-select recommended object types (fields will be fetched when entering step 2)
+    if (result.recommendedObjectTypes.length > 0) {
+      setSelectedObjectTypes(result.recommendedObjectTypes);
+    }
+    // If file was uploaded during consulting, use it
+    if (fileDataFromConsulting) {
+      setUploadedFile(fileDataFromConsulting.uploadResponse);
+      setFileData(fileDataFromConsulting.data);
+    }
+  }, []);
+
+  // Fetch fields when entering object selection step with pre-selected objects
+  useEffect(() => {
+    if (currentStep === 2 && apiKey && selectedObjectTypes.length > 0 && Object.keys(salesmapFields).length === 0) {
+      fetchFieldsForTypes(selectedObjectTypes);
+    }
+  }, [currentStep, apiKey, selectedObjectTypes, salesmapFields]);
+
   const canProgress = () => {
     switch (currentStep) {
-      case 0: // API Key
+      case 0: // Consulting
+        return isConsultingComplete;
+      case 1: // API Key
         return isApiKeyValidated;
-      case 1: // Object Type
+      case 2: // Object Type
         return selectedObjectTypes.length > 0;
-      case 2: // Upload
+      case 3: // Upload
         return uploadedFile !== null;
-      case 3: // Field Mapping
+      case 4: // Field Mapping
         // At least one mapping required
         return fieldMappings.length > 0;
-      case 4: // Review
+      case 5: // Review
         return true;
-      case 5: // Validation - handled separately
+      case 6: // Validation - handled separately
         return false;
       default:
         return false;
@@ -108,7 +139,7 @@ export function Onboarding() {
   };
 
   const handleNext = async () => {
-    if (currentStep === 1) {
+    if (currentStep === 2) {
       // Moving from Object Selection to File Upload
       // Fields should already be fetched when object types were selected
       // But if not, fetch them now
@@ -118,7 +149,7 @@ export function Onboarding() {
         setIsLoading(false);
       }
       setCurrentStep(currentStep + 1);
-    } else if (currentStep === 4) {
+    } else if (currentStep === 5) {
       // Moving from Review to Validation - run validation
       await handleValidate();
     } else if (currentStep < STEPS.length - 1) {
@@ -127,7 +158,7 @@ export function Onboarding() {
   };
 
   const handleBack = () => {
-    if (currentStep === 5) {
+    if (currentStep === 6) {
       // Going back from validation clears the result
       setValidationResult(null);
     }
@@ -155,7 +186,7 @@ export function Onboarding() {
 
       setValidationResult(validationRes);
       setDuplicates(duplicateRes.duplicates);
-      setCurrentStep(5); // Move to validation step
+      setCurrentStep(6); // Move to validation step
     } catch (error) {
       console.error('Validation failed:', error);
       setImportResult({
@@ -228,6 +259,8 @@ export function Onboarding() {
 
   const handleStartOver = () => {
     setCurrentStep(0);
+    setConsultingResult(null);
+    setIsConsultingComplete(false);
     setApiKey('');
     setIsApiKeyValidated(false);
     setSalesmapFields({});
@@ -242,7 +275,7 @@ export function Onboarding() {
   };
 
   const handleCancelValidation = () => {
-    setCurrentStep(4); // Go back to review
+    setCurrentStep(5); // Go back to review
     setValidationResult(null);
     setDuplicates([]);
   };
@@ -267,6 +300,13 @@ export function Onboarding() {
     switch (currentStep) {
       case 0:
         return (
+          <ConsultingStep
+            onComplete={handleConsultingComplete}
+            existingResult={consultingResult}
+          />
+        );
+      case 1:
+        return (
           <ApiKeyStep
             apiKey={apiKey}
             onApiKeyChange={setApiKey}
@@ -274,18 +314,19 @@ export function Onboarding() {
             isValidated={isApiKeyValidated}
           />
         );
-      case 1:
+      case 2:
         return (
           <ObjectSelector
             selectedTypes={selectedObjectTypes}
             onSelect={handleObjectTypesChange}
             salesmapFields={salesmapFields}
             isFetchingFields={isFetchingFields}
+            recommendedTypes={consultingResult?.recommendedObjectTypes}
           />
         );
-      case 2:
-        return <FileUpload onUploadComplete={handleUploadComplete} uploadedFile={uploadedFile} />;
       case 3:
+        return <FileUpload onUploadComplete={handleUploadComplete} uploadedFile={uploadedFile} />;
+      case 4:
         return selectedObjectTypes.length > 0 ? (
           <FieldMapper
             objectTypes={selectedObjectTypes}
@@ -296,9 +337,10 @@ export function Onboarding() {
             salesmapFields={salesmapFields}
             onMappingsChange={setFieldMappings}
             onCustomFieldsChange={setCustomFields}
+            recommendedFields={consultingResult?.recommendedFields}
           />
         ) : null;
-      case 4:
+      case 5:
         return uploadedFile && selectedObjectTypes.length > 0 ? (
           <ReviewStep
             uploadedFile={uploadedFile}
@@ -307,7 +349,7 @@ export function Onboarding() {
             customFields={customFields}
           />
         ) : null;
-      case 5:
+      case 6:
         return validationResult ? (
           <ValidationResultPanel
             result={validationResult}
@@ -330,11 +372,11 @@ export function Onboarding() {
       onNext={handleNext}
       onBack={handleBack}
       canProgress={canProgress()}
-      isLastStep={currentStep === 4} // Review step is the last step before validation
+      isLastStep={currentStep === 5} // Review step is the last step before validation
       isFirstStep={currentStep === 0}
       onComplete={handleComplete}
       isLoading={isLoading || isFetchingFields}
-      hideNavigation={currentStep === 5} // Hide navigation on validation step
+      hideNavigation={currentStep === 6} // Hide navigation on validation step
     >
       {renderStepContent()}
     </Wizard>

@@ -278,3 +278,61 @@ export async function fetchSalesmapFields(
 
   return response.json();
 }
+
+// AI Consulting Chat
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface FileContext {
+  filename: string;
+  columns: string[];
+  sample_data: Record<string, unknown>[];
+  total_rows: number;
+}
+
+export interface ConsultingChatResponse {
+  type: 'message' | 'summary' | 'error';
+  content?: string;
+  data?: {
+    summary: string;
+    recommended_objects: string[];
+    recommended_fields: Array<{
+      object_type: string;
+      field_id: string;
+      field_label: string;
+      reason: string;
+    }>;
+    confirmation_message: string;
+  };
+}
+
+export async function consultingChat(
+  messages: ChatMessage[],
+  isSummaryRequest: boolean = false,
+  fileContext?: FileContext
+): Promise<ConsultingChatResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/consulting/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages,
+        is_summary_request: isSummaryRequest,
+        file_context: fileContext,
+      }),
+    });
+  } catch (e) {
+    throw new Error('AI 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('AI 응답 실패');
+  }
+
+  return response.json();
+}

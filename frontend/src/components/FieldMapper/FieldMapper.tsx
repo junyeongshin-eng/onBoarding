@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { autoMapFields } from '../../services/api';
-import type { CRMField, FieldMapping, SalesmapField } from '../../types';
+import type { CRMField, FieldMapping, SalesmapField, RecommendedField } from '../../types';
 
 interface ExtendedCRMField extends CRMField {
   objectType: string;
   objectName: string;
   isCustom?: boolean;
+  needsCreation?: boolean; // Field recommended but doesn't exist in Salesmap yet
 }
 
 interface FieldMapperProps {
@@ -17,6 +18,7 @@ interface FieldMapperProps {
   salesmapFields?: Record<string, SalesmapField[]>;
   onMappingsChange: (mappings: FieldMapping[]) => void;
   onCustomFieldsChange: (fields: ExtendedCRMField[]) => void;
+  recommendedFields?: RecommendedField[];
 }
 
 const OBJECT_NAMES: Record<string, string> = {
@@ -73,6 +75,7 @@ export function FieldMapper({
   salesmapFields = {},
   onMappingsChange,
   onCustomFieldsChange,
+  recommendedFields = [],
 }: FieldMapperProps) {
   const [allFields, setAllFields] = useState<ExtendedCRMField[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -105,8 +108,33 @@ export function FieldMapper({
             objectType: objType,
             objectName: OBJECT_NAMES[objType] || objType,
             isCustom: f.is_custom,
+            needsCreation: false,
           }));
         fieldsByObject.push(...extendedFields);
+      }
+
+      // Add recommended fields that don't exist in Salesmap
+      for (const rf of recommendedFields) {
+        const existingFields = salesmapFields[rf.objectType] || [];
+        const existsInSalesmap = existingFields.some(f => f.id === rf.fieldId);
+
+        if (!existsInSalesmap) {
+          // Check if already added
+          const alreadyAdded = fieldsByObject.some(
+            f => f.objectType === rf.objectType && f.id === rf.fieldId
+          );
+          if (!alreadyAdded) {
+            fieldsByObject.push({
+              id: rf.fieldId,
+              label: rf.fieldLabel,
+              type: 'text', // Default type for recommended fields
+              required: false,
+              objectType: rf.objectType,
+              objectName: OBJECT_NAMES[rf.objectType] || rf.objectType,
+              needsCreation: true,
+            });
+          }
+        }
       }
 
       // Add custom fields
@@ -140,7 +168,7 @@ export function FieldMapper({
     if (objectTypes.length > 0) {
       loadFields();
     }
-  }, [objectTypes, customFields.length, salesmapFields]);
+  }, [objectTypes, customFields.length, salesmapFields, recommendedFields]);
 
   const handleMappingChange = (sourceColumn: string, targetField: string) => {
     const newMappings = mappings.filter((m) => m.source_column !== sourceColumn);
@@ -200,6 +228,27 @@ export function FieldMapper({
           }))
       );
 
+      // Also include recommended fields that need to be created
+      for (const rf of recommendedFields) {
+        const existingFields = salesmapFields[rf.objectType] || [];
+        const existsInSalesmap = existingFields.some(f => f.id === rf.fieldId);
+
+        if (!existsInSalesmap) {
+          const alreadyAdded = availableFields.some(
+            f => f.object_type === rf.objectType && f.id === rf.fieldId
+          );
+          if (!alreadyAdded) {
+            availableFields.push({
+              key: `${rf.objectType}.${rf.fieldId}`,
+              id: rf.fieldId,
+              label: rf.fieldLabel,
+              object_type: rf.objectType,
+              description: `${rf.fieldLabel} (생성 필요)`,
+            });
+          }
+        }
+      }
+
       const result = await autoMapFields(sourceColumns, sampleData, objectTypes, availableFields);
 
       if (result.error) {
@@ -207,11 +256,11 @@ export function FieldMapper({
         return;
       }
 
-      // Apply AI mappings
+      // Apply AI mappings (including fields that need to be created)
       const newMappings: FieldMapping[] = [];
       for (const [sourceCol, targetField] of Object.entries(result.mappings)) {
         if (targetField) {
-          // Verify the target field exists
+          // Verify the target field exists in allFields (includes needsCreation fields)
           const [objType, fieldId] = targetField.split('.');
           const fieldExists = allFields.some(
             f => f.objectType === objType && f.id === fieldId
@@ -275,6 +324,76 @@ export function FieldMapper({
           {objectTypes.map((t) => OBJECT_NAMES[t]).join(', ')}
         </p>
       </div>
+
+      {/* Recommended Fields from Consulting */}
+      {recommendedFields.length > 0 && (
+        <div className="p-4 border border-slate-200 rounded-lg">
+          <h4 className="font-medium text-slate-800 mb-3 flex items-center gap-2">
+            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+            컨설팅 기반 추천 필드
+          </h4>
+          <p className="text-sm text-slate-600 mb-3">
+            비즈니스 유형에 따라 추천된 필드입니다. 아래 필드들을 매핑해주세요.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {recommendedFields.map((rf) => {
+              // Check if the field exists in Salesmap
+              const fields = salesmapFields[rf.objectType] || [];
+              const existsInSalesmap = fields.some(f => f.id === rf.fieldId);
+
+              return (
+                <div
+                  key={`${rf.objectType}.${rf.fieldId}`}
+                  className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${
+                    existsInSalesmap
+                      ? 'bg-green-50 border border-green-200 text-green-700'
+                      : 'bg-orange-50 border border-orange-200 text-orange-700'
+                  }`}
+                  title={rf.reason}
+                >
+                  {existsInSalesmap ? (
+                    <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  )}
+                  <span className="font-medium">{OBJECT_NAMES[rf.objectType]}</span>
+                  <span>&gt;</span>
+                  <span>{rf.fieldLabel}</span>
+                  {!existsInSalesmap && (
+                    <span className="text-xs bg-orange-100 px-1.5 py-0.5 rounded">
+                      세일즈맵에서 생성 필요
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Warning for missing fields */}
+          {recommendedFields.some(rf => {
+            const fields = salesmapFields[rf.objectType] || [];
+            return !fields.some(f => f.id === rf.fieldId);
+          }) && (
+            <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+              <p className="text-sm text-orange-700 flex items-start gap-2">
+                <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span>
+                  일부 추천 필드가 세일즈맵에 없습니다. 해당 필드를 세일즈맵에서 먼저 생성하거나,
+                  아래 "새 필드 추가" 버튼으로 커스텀 필드를 만들어 매핑할 수 있습니다.
+                </span>
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Available Salesmap Fields */}
       {Object.keys(salesmapFields).length > 0 && (
@@ -501,6 +620,7 @@ export function FieldMapper({
                             {field.required ? ' *' : ''}
                             {field.unique ? ' (고유값)' : ''}
                             {field.isCustom ? ' [커스텀]' : ''}
+                            {field.needsCreation ? ' ⚠️생성필요' : ''}
                             {isFieldUsed(fieldKey, col) ? ' (사용됨)' : ''}
                           </option>
                         );
@@ -624,6 +744,46 @@ export function FieldMapper({
             .join(', ')}
         </div>
       )}
+
+      {/* Fields that need to be created warning */}
+      {(() => {
+        const fieldsNeedingCreation = mappings
+          .map(m => {
+            const [objType, fieldId] = m.target_field.split('.');
+            return allFields.find(f => f.objectType === objType && f.id === fieldId && f.needsCreation);
+          })
+          .filter(Boolean) as ExtendedCRMField[];
+
+        if (fieldsNeedingCreation.length === 0) return null;
+
+        return (
+          <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+            <div className="flex items-start gap-2">
+              <svg className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <p className="font-medium text-orange-800 mb-2">
+                  아래 필드는 세일즈맵에서 먼저 생성해야 합니다:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {fieldsNeedingCreation.map(field => (
+                    <span
+                      key={`${field.objectType}.${field.id}`}
+                      className="px-2 py-1 bg-orange-100 text-orange-700 text-sm rounded"
+                    >
+                      {OBJECT_NAMES[field.objectType]} &gt; {field.label}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-sm text-orange-700 mt-2">
+                  세일즈맵 설정에서 해당 필드를 생성한 후 가져오기를 진행하세요.
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

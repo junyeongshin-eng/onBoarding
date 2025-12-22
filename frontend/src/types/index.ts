@@ -130,3 +130,23 @@ export interface FetchFieldsResponse {
   success: boolean;
   results: ObjectFieldsResult[];
 }
+
+// Consulting step types
+export interface ConsultingAnswer {
+  questionId: string;
+  answer: boolean | string | string[];
+}
+
+export interface RecommendedField {
+  objectType: string;
+  fieldId: string;
+  fieldLabel: string;
+  reason: string;
+}
+
+export interface ConsultingResult {
+  businessType: string;
+  recommendedObjectTypes: string[];
+  recommendedFields: RecommendedField[];
+  answers: ConsultingAnswer[];
+}

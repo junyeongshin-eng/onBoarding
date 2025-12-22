@@ -718,6 +718,7 @@ def get_crm_fields(object_type: str):
 # ============================================
 
 from app.services.salesmap_service import validate_api_key, fetch_object_fields
+from app.services.ai_service import consulting_chat
 
 
 class ApiKeyValidationRequest(BaseModel):
@@ -807,3 +808,69 @@ async def fetch_salesmap_fields(request: FetchFieldsRequest):
 
     all_success = all(r.success for r in results)
     return FetchFieldsResponse(success=all_success, results=results)
+
+
+# ============================================
+# AI Consulting Chat Endpoints
+# ============================================
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class FileContext(BaseModel):
+    filename: str
+    columns: list[str]
+    sample_data: list[dict]
+    total_rows: int
+
+
+class ConsultingChatRequest(BaseModel):
+    messages: list[ChatMessage]
+    is_summary_request: bool = False
+    file_context: Optional[FileContext] = None
+
+
+class ConsultingChatResponse(BaseModel):
+    type: str  # "message", "summary", or "error"
+    content: Optional[str] = None
+    data: Optional[dict] = None
+
+
+@router.post("/consulting/chat", response_model=ConsultingChatResponse)
+async def consulting_chat_endpoint(request: ConsultingChatRequest):
+    """
+    AI-powered consulting chat for B2B CRM data import.
+    Helps users identify their data management needs.
+    """
+    try:
+        messages_dict = [{"role": m.role, "content": m.content} for m in request.messages]
+
+        # Convert file context to dict if present
+        file_context_dict = None
+        if request.file_context:
+            file_context_dict = {
+                "filename": request.file_context.filename,
+                "columns": request.file_context.columns,
+                "sample_data": request.file_context.sample_data,
+                "total_rows": request.file_context.total_rows,
+            }
+
+        result = await consulting_chat(
+            messages_dict,
+            request.is_summary_request,
+            file_context_dict
+        )
+
+        return ConsultingChatResponse(
+            type=result.get("type", "message"),
+            content=result.get("content"),
+            data=result.get("data")
+        )
+    except Exception as e:
+        print(f"Consulting chat error: {e}")
+        return ConsultingChatResponse(
+            type="error",
+            content=f"AI 응답 오류: {str(e)}"
+        )
