@@ -115,6 +115,7 @@ export interface SalesmapField {
   required: boolean;
   is_system: boolean;
   is_custom: boolean;
+  editable: boolean;  // 수정 가능 여부 (시스템 필드가 아니면 true)
 }
 
 export interface ObjectFieldsResult {
