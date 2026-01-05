@@ -186,7 +186,12 @@ export function Onboarding() {
         return isApiKeyValidated;
       case 2: // Object Type
         // Must have selected types, field validation done, and no missing fields
-        return selectedObjectTypes.length > 0 && fieldValidationDone && missingFields.length === 0;
+        const hasTypes = selectedObjectTypes.length > 0;
+        const hasDealOrLead = selectedObjectTypes.includes('deal') || selectedObjectTypes.includes('lead');
+        const hasCompanyOrPeople = selectedObjectTypes.includes('company') || selectedObjectTypes.includes('people');
+        // If deal or lead is selected, must also have company or people
+        const connectionOk = !hasDealOrLead || hasCompanyOrPeople;
+        return hasTypes && fieldValidationDone && missingFields.length === 0 && connectionOk;
       case 3: // Upload
         return uploadedFile !== null;
       case 4: // Field Mapping

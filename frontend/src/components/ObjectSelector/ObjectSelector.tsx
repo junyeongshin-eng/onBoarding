@@ -78,6 +78,11 @@ export function ObjectSelector({
     return fields.filter(f => !f.is_system).length;
   };
 
+  // Check if deal or lead is selected without company or people
+  const hasDealOrLead = selectedTypes.includes('deal') || selectedTypes.includes('lead');
+  const hasCompanyOrPeople = selectedTypes.includes('company') || selectedTypes.includes('people');
+  const needsConnectionObject = hasDealOrLead && !hasCompanyOrPeople;
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -101,6 +106,8 @@ export function ObjectSelector({
           const isRecommended = recommendedTypes.includes(type.id);
           const fieldCount = getFieldCount(type.id);
           const hasFields = fieldCount > 0;
+          // Show orange highlight when deal/lead is selected but company/people is needed
+          const isConnectionRequired = needsConnectionObject && (type.id === 'company' || type.id === 'people');
           return (
             <button
               key={type.id}
@@ -108,30 +115,58 @@ export function ObjectSelector({
               className={`relative p-5 text-left rounded-xl border-2 transition-all ${
                 isSelected
                   ? 'border-blue-500 bg-blue-50'
+                  : isConnectionRequired
+                  ? 'border-orange-400 bg-orange-50 hover:border-orange-500'
                   : isRecommended
                   ? 'border-green-300 bg-green-50/50 hover:border-green-400'
                   : 'border-slate-200 hover:border-slate-300 bg-white'
               }`}
             >
+              {/* Connection required badge */}
+              {isConnectionRequired && !isSelected && (
+                <span className="absolute top-2 right-2 px-2 py-0.5 bg-orange-100 text-orange-700 text-xs font-medium rounded-full flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  필요
+                </span>
+              )}
               {/* Recommended badge */}
-              {isRecommended && (
+              {isRecommended && !isConnectionRequired && (
                 <span className="absolute top-2 right-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">
                   추천
                 </span>
               )}
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${isSelected ? 'bg-blue-100 text-blue-600' : isRecommended ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
+                  <div className={`p-2 rounded-lg ${
+                    isSelected
+                      ? 'bg-blue-100 text-blue-600'
+                      : isConnectionRequired
+                      ? 'bg-orange-100 text-orange-600'
+                      : isRecommended
+                      ? 'bg-green-100 text-green-600'
+                      : 'bg-slate-100 text-slate-500'
+                  }`}>
                     {ICONS[type.id]}
                   </div>
                   <h4 className="text-lg font-semibold text-slate-800">{type.name}</h4>
                 </div>
                 <div className={`w-6 h-6 rounded border-2 flex items-center justify-center ${
-                  isSelected ? 'border-blue-500 bg-blue-500' : 'border-slate-300'
+                  isSelected
+                    ? 'border-blue-500 bg-blue-500'
+                    : isConnectionRequired
+                    ? 'border-orange-400 bg-orange-100'
+                    : 'border-slate-300'
                 }`}>
                   {isSelected && (
                     <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                  {isConnectionRequired && !isSelected && (
+                    <svg className="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01" />
                     </svg>
                   )}
                 </div>
@@ -177,6 +212,32 @@ export function ObjectSelector({
             <span className="font-medium">{selectedTypes.length}개 오브젝트 선택됨:</span>{' '}
             {selectedTypes.map((t) => objectTypes.find((o) => o.id === t)?.name).join(', ')}
           </p>
+        </div>
+      )}
+
+      {/* Warning when deal/lead is selected without company/people */}
+      {needsConnectionObject && (
+        <div className="mt-4 p-4 bg-orange-50 border border-orange-300 rounded-xl">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-orange-100 rounded-lg">
+              <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div>
+              <h4 className="font-semibold text-orange-800">연결 오브젝트가 필요합니다</h4>
+              <p className="text-sm text-orange-700 mt-1">
+                {selectedTypes.includes('deal') && selectedTypes.includes('lead')
+                  ? '딜과 리드는'
+                  : selectedTypes.includes('deal')
+                  ? '딜은'
+                  : '리드는'
+                } 고객 또는 회사와 연결되어야 합니다.
+                <br />
+                <span className="font-medium">회사</span> 또는 <span className="font-medium">고객</span> 중 하나 이상을 선택해주세요.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
