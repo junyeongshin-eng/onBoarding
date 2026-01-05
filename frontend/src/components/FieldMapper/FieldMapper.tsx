@@ -107,7 +107,6 @@ export function FieldMapper({
             required: f.required,
             objectType: objType,
             objectName: OBJECT_NAMES[objType] || objType,
-            isCustom: f.is_custom,
             needsCreation: false,
           }));
         fieldsByObject.push(...extendedFields);
@@ -442,19 +441,10 @@ export function FieldMapper({
                           className={`px-2 py-1 text-xs rounded border ${
                             field.required
                               ? 'bg-red-50 border-red-200 text-red-700'
-                              : field.is_custom
-                              ? 'bg-purple-50 border-purple-200 text-purple-700'
                               : 'bg-slate-50 border-slate-200 text-slate-600'
                           }`}
-                          title={`${field.label} (${field.type})${field.required ? ' - 필수' : ''}${field.is_custom ? ' - 커스텀 필드' : ''}`}
+                          title={`${field.label} (${field.type})${field.required ? ' - 필수' : ''}`}
                         >
-                          {field.is_custom && (
-                            <span className="mr-1 text-purple-500">
-                              <svg className="w-3 h-3 inline-block" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
-                              </svg>
-                            </span>
-                          )}
                           {field.label}
                           {field.required && <span className="text-red-500 ml-1">*</span>}
                         </span>

@@ -167,7 +167,6 @@ async def fetch_object_fields(api_key: str, object_type: str) -> dict:
                     "type": infer_field_type(records, field_name),
                     "required": is_required_field(object_type, field_name),
                     "is_system": is_sys,
-                    "is_custom": is_custom_field(field_name),
                     "editable": not is_sys,  # 시스템 필드가 아니면 수정 가능
                 }
                 fields.append(field_info)
@@ -432,64 +431,6 @@ def is_system_field(field_name: str) -> bool:
     return False
 
 
-def is_custom_field(field_name: str) -> bool:
-    """
-    Check if a field is a custom (user-created) field.
-    Based on Salesmap field specifications - standard importable fields are NOT custom.
-    """
-    # Standard Salesmap importable fields (not custom) - English API names
-    standard_fields_en = {
-        # Common fields
-        "id", "name", "email", "phone", "position", "address", "website",
-        "created_at", "updated_at", "workspace_id", "owner", "owner_id",
-        "description", "note", "notes", "tags", "source",
-        # People/Contact fields
-        "organization", "organization_id", "customer_group", "journey_stage",
-        "profile_image", "linkedin", "unsubscribe_reason", "unsubscribed",
-        "record_id", "recordId",
-        # Lead/Deal fields
-        "status", "amount", "close_date", "expected_date",
-        "pipeline", "pipeline_id", "pipeline_stage", "pipeline_stage_id",
-        "stage", "lead_group", "lead_type", "hold_reason", "hold_detail_reason",
-        "contact", "contact_id", "people", "people_id",
-        "follower", "followers", "main_quote_products",
-        "fail_reason", "fail_detail_reason",
-        # Company/Organization fields
-        "employee_count", "employees",
-        # MRR/Subscription fields
-        "subscription_start", "subscription_end", "monthly_amount",
-        "subscription_start_type", "subscription_end_type",
-    }
-
-    # Standard Salesmap importable fields - Korean labels
-    standard_fields_kr = {
-        # 고객 (People)
-        "이름", "이메일", "포지션", "프로필 사진", "링크드인",
-        "수신 거부 사유", "RecordId", "수신 거부 여부",
-        "소스", "고객 여정 단계", "담당자", "고객 그룹",
-        # 딜 (Deal)
-        "실패 상세 사유", "금액", "월 구독 금액", "상태", "실패 사유",
-        "구독 종료 유형", "구독 시작 유형", "수주 예정일", "마감일",
-        "구독 종료일", "구독 시작일", "팔로워", "파이프라인", "파이프라인 단계",
-        "메인 견적 상품 리스트",
-        # 리드 (Lead)
-        "보류 상세 사유", "유형", "보류 사유", "리드 그룹",
-        # 회사 (Organization)
-        "주소", "전화", "웹 주소", "직원수",
-    }
-
-    # If it's a system field, it's not custom
-    if is_system_field(field_name):
-        return False
-
-    # If it matches standard fields, it's not custom
-    if field_name in standard_fields_en or field_name in standard_fields_kr:
-        return False
-
-    # Otherwise, it's a custom field
-    return True
-
-
 def get_default_fields(object_type: str) -> list:
     """
     Get default importable fields when no data is available.
@@ -504,68 +445,68 @@ def get_default_fields(object_type: str) -> list:
     defaults = {
         # 고객 (People) - Import 가능 필드
         "people": [
-            {"id": "name", "label": "이름", "type": "text", "required": True, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "email", "label": "이메일", "type": "email", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "position", "label": "포지션", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "profile_image", "label": "프로필 사진", "type": "url", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "linkedin", "label": "링크드인", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "unsubscribe_reason", "label": "수신 거부 사유", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "recordId", "label": "RecordId", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "unsubscribed", "label": "수신 거부 여부", "type": "boolean", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "source", "label": "소스", "type": "select", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "journey_stage", "label": "고객 여정 단계", "type": "select", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "owner", "label": "담당자", "type": "user", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "customer_group", "label": "고객 그룹", "type": "multiselect", "required": False, "is_system": False, "is_custom": False, "editable": True},
+            {"id": "name", "label": "이름", "type": "text", "required": True, "is_system": False, "editable": True},
+            {"id": "email", "label": "이메일", "type": "email", "required": False, "is_system": False, "editable": True},
+            {"id": "position", "label": "포지션", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "profile_image", "label": "프로필 사진", "type": "url", "required": False, "is_system": False, "editable": True},
+            {"id": "linkedin", "label": "링크드인", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "unsubscribe_reason", "label": "수신 거부 사유", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "recordId", "label": "RecordId", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "unsubscribed", "label": "수신 거부 여부", "type": "boolean", "required": False, "is_system": False, "editable": True},
+            {"id": "source", "label": "소스", "type": "select", "required": False, "is_system": False, "editable": True},
+            {"id": "journey_stage", "label": "고객 여정 단계", "type": "select", "required": False, "is_system": False, "editable": True},
+            {"id": "owner", "label": "담당자", "type": "user", "required": False, "is_system": False, "editable": True},
+            {"id": "customer_group", "label": "고객 그룹", "type": "multiselect", "required": False, "is_system": False, "editable": True},
         ],
         # 회사 (Organization) - Import 가능 필드
         "company": [
-            {"id": "name", "label": "이름", "type": "text", "required": True, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "profile_image", "label": "프로필 사진", "type": "url", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "address", "label": "주소", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "phone", "label": "전화", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "website", "label": "웹 주소", "type": "url", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "linkedin", "label": "링크드인", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "recordId", "label": "RecordId", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "employee_count", "label": "직원수", "type": "number", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "owner", "label": "담당자", "type": "user", "required": False, "is_system": False, "is_custom": False, "editable": True},
+            {"id": "name", "label": "이름", "type": "text", "required": True, "is_system": False, "editable": True},
+            {"id": "profile_image", "label": "프로필 사진", "type": "url", "required": False, "is_system": False, "editable": True},
+            {"id": "address", "label": "주소", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "phone", "label": "전화", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "website", "label": "웹 주소", "type": "url", "required": False, "is_system": False, "editable": True},
+            {"id": "linkedin", "label": "링크드인", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "recordId", "label": "RecordId", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "employee_count", "label": "직원수", "type": "number", "required": False, "is_system": False, "editable": True},
+            {"id": "owner", "label": "담당자", "type": "user", "required": False, "is_system": False, "editable": True},
         ],
         # 리드 (Lead) - Import 가능 필드
         "lead": [
-            {"id": "name", "label": "이름", "type": "text", "required": True, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "hold_detail_reason", "label": "보류 상세 사유", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "recordId", "label": "RecordId", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "amount", "label": "금액", "type": "number", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "lead_type", "label": "유형", "type": "select", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "status", "label": "상태", "type": "select", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "hold_reason", "label": "보류 사유", "type": "select", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "expected_date", "label": "수주 예정일", "type": "datetime", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "owner", "label": "담당자", "type": "user", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "followers", "label": "팔로워", "type": "users", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "pipeline", "label": "파이프라인", "type": "pipeline", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "pipeline_stage", "label": "파이프라인 단계", "type": "pipeline_stage", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "lead_group", "label": "리드 그룹", "type": "multiselect", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "main_quote_products", "label": "메인 견적 상품 리스트", "type": "multiselect", "required": False, "is_system": False, "is_custom": False, "editable": True},
+            {"id": "name", "label": "이름", "type": "text", "required": True, "is_system": False, "editable": True},
+            {"id": "hold_detail_reason", "label": "보류 상세 사유", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "recordId", "label": "RecordId", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "amount", "label": "금액", "type": "number", "required": False, "is_system": False, "editable": True},
+            {"id": "lead_type", "label": "유형", "type": "select", "required": False, "is_system": False, "editable": True},
+            {"id": "status", "label": "상태", "type": "select", "required": False, "is_system": False, "editable": True},
+            {"id": "hold_reason", "label": "보류 사유", "type": "select", "required": False, "is_system": False, "editable": True},
+            {"id": "expected_date", "label": "수주 예정일", "type": "datetime", "required": False, "is_system": False, "editable": True},
+            {"id": "owner", "label": "담당자", "type": "user", "required": False, "is_system": False, "editable": True},
+            {"id": "followers", "label": "팔로워", "type": "users", "required": False, "is_system": False, "editable": True},
+            {"id": "pipeline", "label": "파이프라인", "type": "pipeline", "required": False, "is_system": False, "editable": True},
+            {"id": "pipeline_stage", "label": "파이프라인 단계", "type": "pipeline_stage", "required": False, "is_system": False, "editable": True},
+            {"id": "lead_group", "label": "리드 그룹", "type": "multiselect", "required": False, "is_system": False, "editable": True},
+            {"id": "main_quote_products", "label": "메인 견적 상품 리스트", "type": "multiselect", "required": False, "is_system": False, "editable": True},
         ],
         # 딜 (Deal) - Import 가능 필드
         "deal": [
-            {"id": "name", "label": "이름", "type": "text", "required": True, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "fail_detail_reason", "label": "실패 상세 사유", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "recordId", "label": "RecordId", "type": "text", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "amount", "label": "금액", "type": "number", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "monthly_amount", "label": "월 구독 금액", "type": "number", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "status", "label": "상태", "type": "select", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "fail_reason", "label": "실패 사유", "type": "multiselect", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "subscription_end_type", "label": "구독 종료 유형", "type": "select", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "subscription_start_type", "label": "구독 시작 유형", "type": "select", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "expected_date", "label": "수주 예정일", "type": "datetime", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "close_date", "label": "마감일", "type": "datetime", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "subscription_end", "label": "구독 종료일", "type": "datetime", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "subscription_start", "label": "구독 시작일", "type": "datetime", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "owner", "label": "담당자", "type": "user", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "followers", "label": "팔로워", "type": "users", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "pipeline", "label": "파이프라인", "type": "pipeline", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "pipeline_stage", "label": "파이프라인 단계", "type": "pipeline_stage", "required": False, "is_system": False, "is_custom": False, "editable": True},
-            {"id": "main_quote_products", "label": "메인 견적 상품 리스트", "type": "multiselect", "required": False, "is_system": False, "is_custom": False, "editable": True},
+            {"id": "name", "label": "이름", "type": "text", "required": True, "is_system": False, "editable": True},
+            {"id": "fail_detail_reason", "label": "실패 상세 사유", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "recordId", "label": "RecordId", "type": "text", "required": False, "is_system": False, "editable": True},
+            {"id": "amount", "label": "금액", "type": "number", "required": False, "is_system": False, "editable": True},
+            {"id": "monthly_amount", "label": "월 구독 금액", "type": "number", "required": False, "is_system": False, "editable": True},
+            {"id": "status", "label": "상태", "type": "select", "required": False, "is_system": False, "editable": True},
+            {"id": "fail_reason", "label": "실패 사유", "type": "multiselect", "required": False, "is_system": False, "editable": True},
+            {"id": "subscription_end_type", "label": "구독 종료 유형", "type": "select", "required": False, "is_system": False, "editable": True},
+            {"id": "subscription_start_type", "label": "구독 시작 유형", "type": "select", "required": False, "is_system": False, "editable": True},
+            {"id": "expected_date", "label": "수주 예정일", "type": "datetime", "required": False, "is_system": False, "editable": True},
+            {"id": "close_date", "label": "마감일", "type": "datetime", "required": False, "is_system": False, "editable": True},
+            {"id": "subscription_end", "label": "구독 종료일", "type": "datetime", "required": False, "is_system": False, "editable": True},
+            {"id": "subscription_start", "label": "구독 시작일", "type": "datetime", "required": False, "is_system": False, "editable": True},
+            {"id": "owner", "label": "담당자", "type": "user", "required": False, "is_system": False, "editable": True},
+            {"id": "followers", "label": "팔로워", "type": "users", "required": False, "is_system": False, "editable": True},
+            {"id": "pipeline", "label": "파이프라인", "type": "pipeline", "required": False, "is_system": False, "editable": True},
+            {"id": "pipeline_stage", "label": "파이프라인 단계", "type": "pipeline_stage", "required": False, "is_system": False, "editable": True},
+            {"id": "main_quote_products", "label": "메인 견적 상품 리스트", "type": "multiselect", "required": False, "is_system": False, "editable": True},
         ],
     }
     return defaults.get(object_type, [])
