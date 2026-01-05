@@ -9,7 +9,7 @@ import { ReviewStep } from '../components/Review/ReviewStep';
 import { SuccessStep } from '../components/Review/SuccessStep';
 import { ValidationResultPanel } from '../components/Review/ValidationResultPanel';
 import { importData, validateImport, detectDuplicates, fetchSalesmapFields } from '../services/api';
-import type { UploadResponse, FieldMapping, ImportResponse, ExtendedCRMField, ValidationResult, DuplicateRecord, SalesmapField, ConsultingResult } from '../types';
+import type { UploadResponse, FieldMapping, ImportResponse, ExtendedCRMField, ValidationResult, DuplicateRecord, SalesmapField, ConsultingResult, MissingFieldInfo } from '../types';
 
 const STEPS = [
   { title: '컨설팅', description: '데이터 관리 방식을 알려주세요' },
@@ -42,6 +42,9 @@ export function Onboarding() {
   const [importResult, setImportResult] = useState<ImportResponse | null>(null);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [duplicates, setDuplicates] = useState<DuplicateRecord[]>([]);
+  // Missing fields validation
+  const [missingFields, setMissingFields] = useState<MissingFieldInfo[]>([]);
+  const [fieldValidationDone, setFieldValidationDone] = useState(false);
 
   const handleUploadComplete = useCallback((data: UploadResponse & { data: Record<string, unknown>[] }) => {
     if (data.filename) {
@@ -54,10 +57,58 @@ export function Onboarding() {
     }
   }, []);
 
+  // Validate recommended fields against Salesmap fields
+  const validateRecommendedFields = useCallback((
+    recommendedFields: ConsultingResult['recommendedFields'],
+    salesmapFieldsMap: Record<string, SalesmapField[]>,
+    objectTypes: string[]
+  ): MissingFieldInfo[] => {
+    const missing: MissingFieldInfo[] = [];
+
+    // Check recommended fields from consulting
+    for (const field of recommendedFields) {
+      if (!objectTypes.includes(field.objectType)) continue;
+
+      const availableFields = salesmapFieldsMap[field.objectType] || [];
+      const exists = availableFields.some(f => f.id === field.fieldId || f.label === field.fieldLabel);
+
+      if (!exists) {
+        missing.push({
+          objectType: field.objectType,
+          fieldId: field.fieldId,
+          fieldLabel: field.fieldLabel,
+          reason: field.reason,
+        });
+      }
+    }
+
+    // Check required connection fields for lead/deal
+    for (const objType of objectTypes) {
+      if (objType === 'lead' || objType === 'deal') {
+        const availableFields = salesmapFieldsMap[objType] || [];
+        const hasPeopleName = availableFields.some(f => f.id === 'people_name' || f.label === '연결된 고객 이름');
+        const hasCompanyName = availableFields.some(f => f.id === 'company_name' || f.label === '연결된 회사 이름');
+
+        if (!hasPeopleName && !hasCompanyName) {
+          // Add both as options - user needs at least one
+          missing.push({
+            objectType: objType,
+            fieldId: 'people_name',
+            fieldLabel: '연결된 고객 이름',
+            reason: `${objType === 'lead' ? '리드' : '딜'}는 고객 또는 회사와 연결이 필수입니다`,
+          });
+        }
+      }
+    }
+
+    return missing;
+  }, []);
+
   const fetchFieldsForTypes = async (types: string[]) => {
     if (!apiKey || types.length === 0) return false;
 
     setIsFetchingFields(true);
+    setFieldValidationDone(false);
     try {
       const result = await fetchSalesmapFields(apiKey, types);
 
@@ -67,6 +118,17 @@ export function Onboarding() {
           fieldsMap[objResult.object_type] = objResult.fields;
         }
         setSalesmapFields(fieldsMap);
+
+        // Validate recommended fields
+        if (consultingResult?.recommendedFields) {
+          const missing = validateRecommendedFields(
+            consultingResult.recommendedFields,
+            fieldsMap,
+            types
+          );
+          setMissingFields(missing);
+        }
+        setFieldValidationDone(true);
         return true;
       } else {
         console.error('Failed to fetch fields');
@@ -123,7 +185,8 @@ export function Onboarding() {
       case 1: // API Key
         return isApiKeyValidated;
       case 2: // Object Type
-        return selectedObjectTypes.length > 0;
+        // Must have selected types, field validation done, and no missing fields
+        return selectedObjectTypes.length > 0 && fieldValidationDone && missingFields.length === 0;
       case 3: // Upload
         return uploadedFile !== null;
       case 4: // Field Mapping
@@ -257,6 +320,13 @@ export function Onboarding() {
     await handleImportAll();
   };
 
+  // Re-check fields (for retry after adding missing fields in Salesmap)
+  const handleRecheckFields = async () => {
+    if (selectedObjectTypes.length > 0) {
+      await fetchFieldsForTypes(selectedObjectTypes);
+    }
+  };
+
   const handleStartOver = () => {
     setCurrentStep(0);
     setConsultingResult(null);
@@ -272,6 +342,8 @@ export function Onboarding() {
     setImportResult(null);
     setValidationResult(null);
     setDuplicates([]);
+    setMissingFields([]);
+    setFieldValidationDone(false);
   };
 
   const handleCancelValidation = () => {
@@ -322,6 +394,9 @@ export function Onboarding() {
             salesmapFields={salesmapFields}
             isFetchingFields={isFetchingFields}
             recommendedTypes={consultingResult?.recommendedObjectTypes}
+            missingFields={missingFields}
+            fieldValidationDone={fieldValidationDone}
+            onRecheckFields={handleRecheckFields}
           />
         );
       case 3:

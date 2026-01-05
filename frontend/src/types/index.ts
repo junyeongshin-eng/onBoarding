@@ -150,3 +150,11 @@ export interface ConsultingResult {
   recommendedFields: RecommendedField[];
   answers: ConsultingAnswer[];
 }
+
+// Missing field validation types
+export interface MissingFieldInfo {
+  objectType: string;
+  fieldId: string;
+  fieldLabel: string;
+  reason: string;
+}

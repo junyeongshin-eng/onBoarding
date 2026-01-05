@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useState, useEffect } from 'react';
 import { getObjectTypes } from '../../services/api';
-import type { ObjectType, SalesmapField } from '../../types';
+import type { ObjectType, SalesmapField, MissingFieldInfo } from '../../types';
 
 interface ObjectSelectorProps {
   selectedTypes: string[];
@@ -9,6 +9,9 @@ interface ObjectSelectorProps {
   salesmapFields?: Record<string, SalesmapField[]>;
   isFetchingFields?: boolean;
   recommendedTypes?: string[];
+  missingFields?: MissingFieldInfo[];
+  fieldValidationDone?: boolean;
+  onRecheckFields?: () => void;
 }
 
 const ICONS: Record<string, ReactNode> = {
@@ -34,7 +37,23 @@ const ICONS: Record<string, ReactNode> = {
   ),
 };
 
-export function ObjectSelector({ selectedTypes, onSelect, salesmapFields = {}, isFetchingFields = false, recommendedTypes = [] }: ObjectSelectorProps) {
+export function ObjectSelector({
+  selectedTypes,
+  onSelect,
+  salesmapFields = {},
+  isFetchingFields = false,
+  recommendedTypes = [],
+  missingFields = [],
+  fieldValidationDone = false,
+  onRecheckFields,
+}: ObjectSelectorProps) {
+
+  const OBJECT_NAMES: Record<string, string> = {
+    company: '회사',
+    people: '고객',
+    lead: '리드',
+    deal: '딜',
+  };
   const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -196,6 +215,71 @@ export function ObjectSelector({ selectedTypes, onSelect, salesmapFields = {}, i
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Missing fields warning */}
+      {fieldValidationDone && missingFields.length > 0 && (
+        <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+          <h4 className="font-medium text-red-800 mb-3 flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            누락된 필드가 있습니다
+          </h4>
+          <p className="text-sm text-red-600 mb-3">
+            다음 필드가 세일즈맵에 존재하지 않습니다. 세일즈맵에서 필드를 추가한 후 다시 확인해주세요.
+          </p>
+          <div className="space-y-2 mb-4">
+            {missingFields.map((field, idx) => (
+              <div key={idx} className="flex items-center gap-2 text-sm bg-white p-2 rounded-lg border border-red-100">
+                <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">
+                  {OBJECT_NAMES[field.objectType] || field.objectType}
+                </span>
+                <span className="font-medium text-red-800">{field.fieldLabel}</span>
+                <span className="text-red-600">- {field.reason}</span>
+              </div>
+            ))}
+          </div>
+          {onRecheckFields && (
+            <button
+              onClick={onRecheckFields}
+              disabled={isFetchingFields}
+              className="w-full py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+            >
+              {isFetchingFields ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  확인 중...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  다시 확인하기
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Field validation success */}
+      {fieldValidationDone && missingFields.length === 0 && selectedTypes.length > 0 && (
+        <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-xl">
+          <div className="flex items-center gap-2 text-green-700">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="font-medium">필드 검증 완료</span>
+          </div>
+          <p className="text-sm text-green-600 mt-1">
+            모든 필수 필드가 세일즈맵에 존재합니다. 다음 단계로 진행할 수 있습니다.
+          </p>
         </div>
       )}
 
