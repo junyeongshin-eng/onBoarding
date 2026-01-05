@@ -17,9 +17,9 @@ class SalesmapClient:
             "Authorization": f"Bearer {self.api_key}"
         }
 
-    async def import_contacts(self, contacts: list[dict]) -> dict:
+    async def import_people(self, people: list[dict]) -> dict:
         """
-        Import contacts to Salesmap CRM.
+        Import people to Salesmap CRM.
 
         In production, this would make actual API calls to Salesmap.
         Currently returns a simulated success response.
@@ -27,16 +27,16 @@ class SalesmapClient:
         # TODO: Replace with actual Salesmap API call
         # async with httpx.AsyncClient() as client:
         #     response = await client.post(
-        #         f"{self.base_url}/contacts/bulk",
+        #         f"{self.base_url}/people/bulk",
         #         headers=self.headers,
-        #         json={"contacts": contacts}
+        #         json={"people": people}
         #     )
         #     return response.json()
 
         # Simulated response for development
         return {
             "success": True,
-            "imported_count": len(contacts),
+            "imported_count": len(people),
             "errors": []
         }
 
@@ -45,7 +45,7 @@ class SalesmapClient:
         Import data to Salesmap CRM for a specific object type.
 
         Args:
-            object_type: Type of object (company, contact, lead, deal)
+            object_type: Type of object (company, people, lead, deal)
             data: List of records to import
             custom_fields: List of custom fields to create
 
@@ -57,7 +57,7 @@ class SalesmapClient:
         # Endpoint mapping for different object types
         # endpoints = {
         #     "company": "/companies/bulk",
-        #     "contact": "/contacts/bulk",
+        #     "people": "/people/bulk",
         #     "lead": "/leads/bulk",
         #     "deal": "/deals/bulk",
         # }
@@ -109,10 +109,10 @@ class SalesmapClient:
             "message": f"Template {template_id} applied successfully"
         }
 
-    async def get_contacts(self, limit: int = 100, offset: int = 0) -> dict:
-        """Get contacts from Salesmap"""
+    async def get_people(self, limit: int = 100, offset: int = 0) -> dict:
+        """Get people from Salesmap"""
         # TODO: Implement actual API call
-        return {"contacts": [], "total": 0}
+        return {"people": [], "total": 0}
 
     async def test_connection(self) -> bool:
         """Test API connection"""

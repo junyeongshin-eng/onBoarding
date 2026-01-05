@@ -5,7 +5,7 @@ SALESMAP_BASE_URL = "https://salesmap.kr/api/v2"
 
 # Mapping from internal object types to Salesmap API endpoints
 SALESMAP_ENDPOINTS = {
-    "contact": "people",
+    "people": "people",
     "deal": "deal",
     "lead": "lead",
     "company": "organization",
@@ -13,7 +13,7 @@ SALESMAP_ENDPOINTS = {
 
 # Korean names for objects
 OBJECT_NAMES_KR = {
-    "contact": "고객",
+    "people": "고객",
     "deal": "딜",
     "lead": "리드",
     "company": "회사",
@@ -77,7 +77,7 @@ async def fetch_object_fields(api_key: str, object_type: str) -> dict:
 
     Args:
         api_key: Salesmap API key
-        object_type: One of 'contact', 'deal', 'lead', 'company'
+        object_type: One of 'people', 'deal', 'lead', 'company'
 
     Returns:
         Dictionary with fields list and metadata
@@ -378,7 +378,7 @@ def is_required_field(object_type: str, field_name: str) -> bool:
     """
     required_fields = {
         # 고객 (People) - 이름만 필수
-        "contact": ["name", "이름"],
+        "people": ["name", "이름"],
         # 회사 (Organization) - 이름만 필수
         "company": ["name", "이름"],
         # 리드 (Lead) - 이름만 필수
@@ -501,7 +501,7 @@ def get_default_fields(object_type: str) -> list:
     """
     defaults = {
         # 고객 (People) - Import 가능 필드
-        "contact": [
+        "people": [
             {"id": "name", "label": "이름", "type": "text", "required": True, "is_system": False, "is_custom": False},
             {"id": "email", "label": "이메일", "type": "email", "required": False, "is_system": False, "is_custom": False},
             {"id": "position", "label": "포지션", "type": "text", "required": False, "is_system": False, "is_custom": False},

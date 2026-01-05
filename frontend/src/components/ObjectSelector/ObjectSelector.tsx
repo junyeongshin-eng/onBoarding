@@ -17,7 +17,7 @@ const ICONS: Record<string, ReactNode> = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
     </svg>
   ),
-  contact: (
+  people: (
     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
     </svg>
@@ -177,7 +177,7 @@ export function ObjectSelector({ selectedTypes, onSelect, salesmapFields = {}, i
                 <span>'이름' 필드 필수 (헤더: <code className="bg-amber-100 px-1 rounded">Organization - 이름</code>)</span>
               </div>
             )}
-            {selectedTypes.includes('contact') && (
+            {selectedTypes.includes('people') && (
               <div className="flex items-start gap-2 text-amber-700">
                 <span className="font-medium min-w-[60px]">고객:</span>
                 <span>'이름' 필드 필수 (헤더: <code className="bg-amber-100 px-1 rounded">People - 이름</code>)</span>
@@ -186,13 +186,13 @@ export function ObjectSelector({ selectedTypes, onSelect, salesmapFields = {}, i
             {selectedTypes.includes('lead') && (
               <div className="flex items-start gap-2 text-amber-700">
                 <span className="font-medium min-w-[60px]">리드:</span>
-                <span>고객(People) 또는 회사(Organization) 중 하나 반드시 연결 필요</span>
+                <span>'연결된 고객 이름' 또는 '연결된 회사 이름' 필드 중 하나 필수</span>
               </div>
             )}
             {selectedTypes.includes('deal') && (
               <div className="flex items-start gap-2 text-amber-700">
                 <span className="font-medium min-w-[60px]">딜:</span>
-                <span>고객(People) 또는 회사(Organization) 중 하나 반드시 연결 필요</span>
+                <span>'연결된 고객 이름' 또는 '연결된 회사 이름' 필드 중 하나 필수</span>
               </div>
             )}
           </div>

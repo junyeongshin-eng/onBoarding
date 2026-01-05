@@ -239,7 +239,7 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
   const getObjectName = (type: string) => {
     const names: Record<string, string> = {
       company: '회사',
-      contact: '고객',
+      people: '고객',
       lead: '리드',
       deal: '딜',
     };

@@ -11,7 +11,7 @@ router = APIRouter()
 # Mapping from internal object types to Salesmap import format
 SALESMAP_OBJECT_NAMES = {
     "company": "Organization",
-    "contact": "People",
+    "people": "People",
     "lead": "Lead",
     "deal": "Deal",
 }
@@ -26,7 +26,7 @@ SALESMAP_FIELD_NAMES = {
         "website": "웹 주소",
         "owner": "담당자",
     },
-    "contact": {
+    "people": {
         "name": "이름",
         "email": "이메일",
         "phone": "전화번호",
@@ -46,8 +46,8 @@ SALESMAP_FIELD_NAMES = {
         "pipeline": "파이프라인",
         "pipeline_stage": "파이프라인 단계",
         "lead_group": "리드 그룹",
-        "contact": "연결된 고객",
-        "company": "연결된 회사",
+        "people_name": "연결된 고객 이름",
+        "company_name": "연결된 회사 이름",
     },
     "deal": {
         "name": "이름",
@@ -58,8 +58,8 @@ SALESMAP_FIELD_NAMES = {
         "owner": "담당자",
         "pipeline": "파이프라인",
         "pipeline_stage": "파이프라인 단계",
-        "contact": "연결된 고객",
-        "company": "연결된 회사",
+        "people_name": "연결된 고객 이름",
+        "company_name": "연결된 회사 이름",
         "subscription_start": "구독 시작일",
         "subscription_end": "구독 종료일",
         "monthly_amount": "월 구독 금액",
@@ -121,7 +121,7 @@ async def import_data(request: ImportRequest):
     """
     try:
         # Validate object types
-        valid_types = {"company", "contact", "lead", "deal"}
+        valid_types = {"company", "people", "lead", "deal"}
         for obj_type in request.object_types:
             if obj_type not in valid_types:
                 raise HTTPException(status_code=400, detail=f"잘못된 오브젝트 타입: {obj_type}")
@@ -229,7 +229,7 @@ async def preview_import(request: ImportRequest):
     Preview the import without generating a file.
     Returns count and validation info.
     """
-    valid_types = {"company", "contact", "lead", "deal"}
+    valid_types = {"company", "people", "lead", "deal"}
     errors = []
 
     for obj_type in request.object_types:
@@ -246,7 +246,7 @@ async def preview_import(request: ImportRequest):
 
     # Validate required fields
     required_fields = {
-        "contact": "name",
+        "people": "name",
         "company": "name",
         "lead": "name",
         "deal": "name",
@@ -260,8 +260,23 @@ async def preview_import(request: ImportRequest):
                 for m in request.field_mappings
             )
             if not has_required:
-                obj_name = {"company": "회사", "contact": "고객", "lead": "리드", "deal": "딜"}.get(obj_type, obj_type)
+                obj_name = {"company": "회사", "people": "고객", "lead": "리드", "deal": "딜"}.get(obj_type, obj_type)
                 errors.append(f"{obj_name}의 필수 필드 '이름'이 매핑되지 않았습니다")
+
+    # Validate lead/deal connection requirement
+    for obj_type in ["lead", "deal"]:
+        if obj_type in request.object_types:
+            has_people_name = any(
+                m.target_field == f"{obj_type}.people_name"
+                for m in request.field_mappings
+            )
+            has_company_name = any(
+                m.target_field == f"{obj_type}.company_name"
+                for m in request.field_mappings
+            )
+            if not has_people_name and not has_company_name:
+                obj_name = {"lead": "리드", "deal": "딜"}.get(obj_type, obj_type)
+                errors.append(f"{obj_name}은 '연결된 고객 이름' 또는 '연결된 회사 이름' 중 하나가 반드시 매핑되어야 합니다")
 
     return ImportResponse(
         success=len(errors) == 0,
@@ -450,42 +465,32 @@ async def validate_import(request: ImportRequest):
                 else:
                     unique_values[unique_key].add(str_value.lower())
 
-        # Check Lead/Deal connection requirement
-        if "lead" in request.object_types or "deal" in request.object_types:
-            has_people = any(
-                m.target_field.startswith("contact.") for m in request.field_mappings
-            )
-            has_org = any(
-                m.target_field.startswith("company.") for m in request.field_mappings
-            )
+        # Check Lead/Deal connection requirement - must have people_name or company_name in the same row
+        for obj_type in ["lead", "deal"]:
+            if obj_type in request.object_types:
+                # Find source columns mapped to people_name or company_name for this object
+                people_name_col = None
+                company_name_col = None
+                for source_col, (o_type, field_id, _) in field_lookup.items():
+                    if o_type == obj_type:
+                        if field_id == "people_name":
+                            people_name_col = source_col
+                        elif field_id == "company_name":
+                            company_name_col = source_col
 
-            if not has_people and not has_org:
-                # Check if there's data for people or org in the row
-                people_value = None
-                org_value = None
-                for source_col, (obj_type, field_id, _) in field_lookup.items():
-                    if obj_type == "contact":
-                        people_value = row.get(source_col)
-                    elif obj_type == "company":
-                        org_value = row.get(source_col)
+                # Check if at least one connection field has a value in this row
+                people_value = row.get(people_name_col, "") if people_name_col else ""
+                company_value = row.get(company_name_col, "") if company_name_col else ""
 
-                if not people_value and not org_value:
-                    if "lead" in request.object_types:
-                        validation_errors.append(ValidationError(
-                            row=row_idx,
-                            field="연결",
-                            message="리드는 고객 또는 회사 중 하나는 반드시 입력해야 합니다",
-                            severity="error"
-                        ))
-                        row_has_error = True
-                    if "deal" in request.object_types:
-                        validation_errors.append(ValidationError(
-                            row=row_idx,
-                            field="연결",
-                            message="딜은 고객 또는 회사 중 하나는 반드시 입력해야 합니다",
-                            severity="error"
-                        ))
-                        row_has_error = True
+                if not str(people_value).strip() and not str(company_value).strip():
+                    obj_name = {"lead": "리드", "deal": "딜"}.get(obj_type, obj_type)
+                    validation_errors.append(ValidationError(
+                        row=row_idx,
+                        field="연결",
+                        message=f"{obj_name}은 '연결된 고객 이름' 또는 '연결된 회사 이름' 중 하나가 반드시 입력되어야 합니다",
+                        severity="error"
+                    ))
+                    row_has_error = True
 
         if not row_has_error:
             valid_row_indices.append(row_idx - 1)  # Store 0-indexed
@@ -517,7 +522,7 @@ OBJECT_FIELDS = {
             {"id": "owner", "label": "담당자", "type": "text", "required": False},
         ]
     },
-    "contact": {
+    "people": {
         "name": "고객",
         "fields": [
             {"id": "name", "label": "이름", "type": "text", "required": True},
@@ -543,8 +548,8 @@ OBJECT_FIELDS = {
             {"id": "pipeline", "label": "파이프라인", "type": "text", "required": False},
             {"id": "pipeline_stage", "label": "파이프라인 단계", "type": "text", "required": False},
             {"id": "lead_group", "label": "리드 그룹", "type": "select", "required": False},
-            {"id": "contact", "label": "연결된 고객", "type": "relation", "required": False},
-            {"id": "company", "label": "연결된 회사", "type": "relation", "required": False},
+            {"id": "people_name", "label": "연결된 고객 이름", "type": "text", "required": False},
+            {"id": "company_name", "label": "연결된 회사 이름", "type": "text", "required": False},
         ]
     },
     "deal": {
@@ -557,10 +562,10 @@ OBJECT_FIELDS = {
             {"id": "close_date", "label": "마감일", "type": "date", "required": False},
             {"id": "expected_date", "label": "수주 예정일", "type": "date", "required": False},
             {"id": "owner", "label": "담당자", "type": "text", "required": False},
-            {"id": "pipeline", "label": "파이프라인", "type": "text", "required": False},
-            {"id": "pipeline_stage", "label": "파이프라인 단계", "type": "text", "required": False},
-            {"id": "contact", "label": "연결된 고객", "type": "relation", "required": False},
-            {"id": "company", "label": "연결된 회사", "type": "relation", "required": False},
+            {"id": "pipeline", "label": "파이프라인", "type": "text", "required": True},
+            {"id": "pipeline_stage", "label": "파이프라인 단계", "type": "text", "required": True},
+            {"id": "people_name", "label": "연결된 고객 이름", "type": "text", "required": False},
+            {"id": "company_name", "label": "연결된 회사 이름", "type": "text", "required": False},
             # MRR fields for deals
             {"id": "subscription_start", "label": "구독 시작일", "type": "date", "required": False},
             {"id": "subscription_end", "label": "구독 종료일", "type": "date", "required": False},
@@ -575,7 +580,7 @@ from app.services.ai_service import auto_map_fields, detect_duplicates, ai_detec
 
 
 class AvailableField(BaseModel):
-    key: str  # e.g., "contact.name"
+    key: str  # e.g., "people.name"
     id: str
     label: str
     object_type: str
@@ -697,9 +702,9 @@ def get_object_types():
     return {
         "object_types": [
             {"id": "company", "name": "회사", "description": "회사/조직 데이터"},
-            {"id": "contact", "name": "고객", "description": "고객/연락처 데이터"},
-            {"id": "lead", "name": "리드", "description": "리드 데이터"},
-            {"id": "deal", "name": "딜", "description": "딜/거래 데이터"},
+            {"id": "people", "name": "고객", "description": "고객/연락처 데이터"},
+            {"id": "lead", "name": "리드", "description": "리드 데이터 (고객 또는 회사 연결 필수)"},
+            {"id": "deal", "name": "딜", "description": "딜/거래 데이터 (고객 또는 회사 연결 필수)"},
         ]
     }
 

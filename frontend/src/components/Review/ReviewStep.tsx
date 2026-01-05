@@ -11,7 +11,7 @@ interface ReviewStepProps {
 
 const OBJECT_NAMES: Record<string, string> = {
   company: '회사',
-  contact: '고객',
+  people: '고객',
   lead: '리드',
   deal: '딜',
 };

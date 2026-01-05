@@ -23,7 +23,7 @@ interface FieldMapperProps {
 
 const OBJECT_NAMES: Record<string, string> = {
   company: '회사',
-  contact: '고객',
+  people: '고객',
   lead: '리드',
   deal: '딜',
 };
@@ -87,7 +87,7 @@ export function FieldMapper({
   const [newField, setNewField] = useState({
     label: '',
     type: 'text',
-    objectType: objectTypes[0] || 'contact',
+    objectType: objectTypes[0] || 'people',
   });
 
   useEffect(() => {
@@ -201,7 +201,7 @@ export function FieldMapper({
     };
 
     onCustomFieldsChange([...customFields, newCustomField]);
-    setNewField({ label: '', type: 'text', objectType: objectTypes[0] || 'contact' });
+    setNewField({ label: '', type: 'text', objectType: objectTypes[0] || 'people' });
     setShowAddField(false);
   };
 
