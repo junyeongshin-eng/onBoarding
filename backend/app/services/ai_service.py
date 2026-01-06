@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from openai import OpenAI
 from typing import Optional
 from difflib import SequenceMatcher
@@ -16,6 +17,37 @@ def get_openai_client() -> OpenAI:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
         client = OpenAI(api_key=api_key)
     return client
+
+
+def parse_thinking_response(content: str) -> dict:
+    """
+    Parse AI response that contains <thinking> tags.
+    Returns dict with 'thinking' and 'result' keys.
+    """
+    thinking = ""
+    result_content = content
+
+    # Extract thinking content
+    thinking_match = re.search(r'<thinking>(.*?)</thinking>', content, re.DOTALL)
+    if thinking_match:
+        thinking = thinking_match.group(1).strip()
+        result_content = re.sub(r'<thinking>.*?</thinking>', '', content, flags=re.DOTALL).strip()
+
+    # Try to parse JSON from result
+    try:
+        # Find JSON in the result content
+        json_match = re.search(r'\{[\s\S]*\}', result_content)
+        if json_match:
+            result = json.loads(json_match.group())
+        else:
+            result = {}
+    except json.JSONDecodeError:
+        result = {}
+
+    return {
+        "thinking": thinking,
+        "result": result
+    }
 
 
 # Field mapping definitions for reference
@@ -74,35 +106,38 @@ SALESMAP_FIELDS = {
 async def auto_map_fields(
     source_columns: list[str],
     sample_data: list[dict],
-    target_object_types: list[str]
-) -> dict[str, str]:
+    target_object_types: list[str],
+    available_fields: list = None
+) -> dict:
     """
-    Use AI to automatically map source columns to CRM fields.
-
-    Args:
-        source_columns: List of column names from uploaded file
-        sample_data: Sample rows from the uploaded file
-        target_object_types: List of object types selected by user
-
-    Returns:
-        Dictionary mapping source column -> target field (e.g., "이름" -> "people.name")
+    Use AI with Chain-of-Thought to automatically map source columns to CRM fields.
+    Returns mapping results with AI's reasoning process.
     """
     # Build field options for the prompt
     field_options = []
-    for obj_type in target_object_types:
-        if obj_type in SALESMAP_FIELDS:
-            obj_info = SALESMAP_FIELDS[obj_type]
-            for field in obj_info["fields"]:
-                field_options.append({
-                    "key": f"{obj_type}.{field['id']}",
-                    "label": f"{obj_info['name']} - {field['label']}",
-                    "description": field["description"]
-                })
+
+    if available_fields:
+        for field_info in available_fields:
+            field_options.append({
+                "key": field_info.get("key", ""),
+                "label": field_info.get("label", ""),
+                "description": field_info.get("description", field_info.get("label", ""))
+            })
+    else:
+        for obj_type in target_object_types:
+            if obj_type in SALESMAP_FIELDS:
+                obj_info = SALESMAP_FIELDS[obj_type]
+                for field in obj_info["fields"]:
+                    field_options.append({
+                        "key": f"{obj_type}.{field['id']}",
+                        "label": f"{obj_info['name']} - {field['label']}",
+                        "description": field["description"]
+                    })
 
     # Prepare sample data for context
     sample_str = ""
-    for col in source_columns[:10]:  # Limit columns
-        values = [str(row.get(col, ""))[:50] for row in sample_data[:3] if row.get(col)]
+    for col in source_columns[:15]:
+        values = [str(row.get(col, ""))[:50] for row in sample_data[:5] if row.get(col)]
         if values:
             sample_str += f"- {col}: {', '.join(values)}\n"
 
@@ -117,20 +152,39 @@ async def auto_map_fields(
 ## 타겟 CRM 필드
 {json.dumps(field_options, ensure_ascii=False, indent=2)}
 
-## 작업
-각 소스 컬럼을 가장 적합한 CRM 필드에 매핑하세요.
-컬럼명과 샘플 데이터를 분석하여 의미적으로 가장 잘 맞는 필드를 선택하세요.
-매핑이 불확실하면 null로 표시하세요.
+## 분석 과정
+각 컬럼을 분석하며 아래 과정을 <thinking> 태그 안에 상세히 작성하세요.
 
-JSON 형식으로만 응답하세요:
+<thinking>
+각 소스 컬럼을 하나씩 분석합니다:
+
+**[컬럼명]**
+1. 컬럼명 해석: 이 이름이 무엇을 의미하는가?
+2. 샘플 데이터 분석:
+   - 데이터 형태: 텍스트/숫자/날짜/이메일/전화번호 등
+   - 값의 패턴과 예시가 말해주는 것
+3. 후보 타겟 필드 (1순위, 2순위)
+4. 최종 선택과 신뢰도 (0.0-1.0)
+5. 선택 근거
+
+(모든 컬럼에 대해 반복)
+
+### 매핑 요약
+- 높은 신뢰도 매핑: ...
+- 낮은 신뢰도 매핑: ...
+- 매핑 불가 컬럼: ...
+</thinking>
+
+분석을 완료한 후, 아래 JSON 형식으로 결과를 정리하세요:
 {{
   "mappings": {{
-    "소스컬럼명": "object_type.field_id 또는 null",
-    ...
+    "소스컬럼명": "object_type.field_id 또는 null"
   }},
   "confidence": {{
-    "소스컬럼명": 0.0-1.0 (신뢰도),
-    ...
+    "소스컬럼명": 0.0-1.0
+  }},
+  "reasoning": {{
+    "소스컬럼명": "매핑 근거 한 줄 요약"
   }}
 }}"""
 
@@ -139,18 +193,22 @@ JSON 형식으로만 응답하세요:
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a CRM data mapping expert. Respond only with valid JSON."},
+                {"role": "system", "content": "You are a CRM data mapping expert. First show your thinking process in <thinking> tags, then provide the JSON result."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.1,
-            response_format={"type": "json_object"}
+            temperature=0.2,
+            max_tokens=4000
         )
 
-        result = json.loads(response.choices[0].message.content)
+        content = response.choices[0].message.content
+        parsed = parse_thinking_response(content)
+
+        result = parsed["result"]
+        result["thinking"] = parsed["thinking"]
+
         return result
     except Exception as e:
         print(f"AI mapping error: {e}")
-        # Fallback to simple rule-based mapping
         return {"mappings": {}, "confidence": {}, "error": str(e)}
 
 
@@ -169,15 +227,7 @@ async def detect_duplicates(
     threshold: float = 0.85
 ) -> list[dict]:
     """
-    Detect potential duplicate records in the data.
-
-    Args:
-        data: List of data rows
-        field_mappings: Field mappings to know which fields to compare
-        threshold: Similarity threshold (0-1) for considering as duplicate
-
-    Returns:
-        List of duplicate groups with row indices and similarity scores
+    Detect potential duplicate records in the data using string similarity.
     """
     duplicates = []
 
@@ -197,7 +247,7 @@ async def detect_duplicates(
 
     for i, row1 in enumerate(data):
         for j, row2 in enumerate(data):
-            if i >= j:  # Skip same row and already checked pairs
+            if i >= j:
                 continue
 
             pair_key = (min(i, j), max(i, j))
@@ -228,7 +278,7 @@ async def detect_duplicates(
 
                 if avg_similarity >= threshold:
                     duplicates.append({
-                        "row1": i + 1,  # 1-indexed for display
+                        "row1": i + 1,
                         "row2": j + 1,
                         "similarity": round(avg_similarity, 2),
                         "field_similarities": field_similarities,
@@ -236,48 +286,171 @@ async def detect_duplicates(
                         "data2": {k: str(v)[:50] for k, v in row2.items() if v}
                     })
 
-    # Sort by similarity (highest first)
     duplicates.sort(key=lambda x: x["similarity"], reverse=True)
+    return duplicates[:50]
 
-    return duplicates[:50]  # Limit to top 50 duplicates
+
+async def consulting_chat(
+    messages: list[dict],
+    is_summary_request: bool = False,
+    file_context: dict = None
+) -> dict:
+    """
+    AI-powered consulting chat for B2B CRM data import.
+    """
+    system_prompt = """당신은 B2B CRM 데이터 관리 컨설턴트입니다.
+사용자가 세일즈맵(Salesmap)에 데이터를 임포트하려고 합니다.
+사용자의 비즈니스 유형과 데이터 관리 요구사항을 파악하여 적절한 오브젝트(회사, 고객, 리드, 딜)와 필드를 추천해주세요.
+
+## 오브젝트 설명
+- 회사(Company): B2B 거래처, 조직 정보
+- 고객(People): 개인 연락처, 담당자 정보
+- 리드(Lead): 잠재 영업 기회, 초기 상담
+- 딜(Deal): 진행 중인 거래, 계약
+
+## 주요 질문 포인트
+1. 어떤 사업을 하시나요? (B2B/B2C, 업종)
+2. 현재 어떤 데이터를 관리하고 계신가요?
+3. 어떤 목적으로 데이터를 임포트하시나요?
+4. 기존에 CRM을 사용하셨나요?
+
+친근하고 전문적인 톤으로 대화하세요. 한국어로 답변하세요."""
+
+    if file_context:
+        file_info = f"""
+
+## 업로드된 파일 정보
+- 파일명: {file_context.get('filename', 'Unknown')}
+- 컬럼: {', '.join(file_context.get('columns', [])[:10])}
+- 총 행 수: {file_context.get('total_rows', 0)}
+- 샘플 데이터: {json.dumps(file_context.get('sample_data', [])[:3], ensure_ascii=False)}"""
+        system_prompt += file_info
+
+    if is_summary_request:
+        system_prompt += """
+
+## 요약 요청
+대화 내용을 바탕으로 다음 JSON 형식으로 추천을 생성하세요:
+{
+  "summary": "사용자 비즈니스 요약 (1-2문장)",
+  "recommended_objects": ["people", "deal"],
+  "recommended_fields": [
+    {
+      "object_type": "people",
+      "field_id": "customer_group",
+      "field_label": "고객 그룹",
+      "reason": "추천 이유"
+    }
+  ],
+  "confirmation_message": "위 내용이 맞으시면 확인을 눌러주세요."
+}
+JSON만 응답하세요."""
+
+    try:
+        openai_client = get_openai_client()
+
+        all_messages = [{"role": "system", "content": system_prompt}]
+        all_messages.extend(messages)
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=all_messages,
+            temperature=0.7 if not is_summary_request else 0.3,
+            response_format={"type": "json_object"} if is_summary_request else None
+        )
+
+        content = response.choices[0].message.content
+
+        if is_summary_request:
+            try:
+                data = json.loads(content)
+                return {
+                    "type": "summary",
+                    "content": None,
+                    "data": data
+                }
+            except json.JSONDecodeError:
+                return {
+                    "type": "message",
+                    "content": content,
+                    "data": None
+                }
+        else:
+            return {
+                "type": "message",
+                "content": content,
+                "data": None
+            }
+
+    except Exception as e:
+        print(f"Consulting chat error: {e}")
+        return {
+            "type": "error",
+            "content": f"AI 응답 오류: {str(e)}",
+            "data": None
+        }
 
 
 async def ai_detect_duplicates(
     data: list[dict],
     field_mappings: list[dict],
-    sample_size: int = 100
+    threshold: float = 0.7
 ) -> list[dict]:
     """
-    Use AI to detect semantic duplicates that simple string matching might miss.
-
-    Args:
-        data: List of data rows
-        field_mappings: Field mappings
-        sample_size: Number of rows to analyze (for performance)
-
-    Returns:
-        List of potential duplicate pairs with AI analysis
+    Use AI with Chain-of-Thought to detect semantic duplicates.
+    Returns duplicate analysis with AI's reasoning process.
     """
     # First, run basic duplicate detection
-    basic_duplicates = await detect_duplicates(data, field_mappings, threshold=0.7)
+    basic_duplicates = await detect_duplicates(data, field_mappings, threshold=threshold)
 
     if not basic_duplicates:
         return []
 
-    # Use AI to analyze ambiguous cases (similarity between 0.7 and 0.9)
-    ambiguous_cases = [d for d in basic_duplicates if 0.7 <= d["similarity"] < 0.9]
+    # Use AI to analyze ambiguous cases
+    ambiguous_cases = [d for d in basic_duplicates if threshold <= d["similarity"] < 0.95]
 
     if not ambiguous_cases:
         return basic_duplicates
 
-    # Prepare prompt for AI analysis
-    cases_for_ai = ambiguous_cases[:10]  # Limit for API cost
+    cases_for_ai = ambiguous_cases[:10]
 
-    prompt = f"""다음은 잠재적 중복 레코드 쌍입니다. 각 쌍이 실제로 같은 사람/회사인지 분석해주세요.
+    prompt = f"""당신은 데이터 품질 전문가입니다.
 
+## 잠재적 중복 레코드
 {json.dumps(cases_for_ai, ensure_ascii=False, indent=2)}
 
-각 케이스에 대해 JSON으로 응답하세요:
+## 중복 판단 과정
+각 후보 쌍에 대해 분석하세요.
+
+<thinking>
+### 후보 쌍 분석
+
+각 쌍에 대해:
+
+**Row {{row1}} vs Row {{row2}}**
+
+1. 필드별 비교:
+   - 이름: "{{name1}}" vs "{{name2}}" → 동일인/다른 사람/불확실
+   - 이메일: 도메인이 같은가? 아이디 패턴이 유사한가?
+   - 회사: (주), 주식회사 등 변형 고려
+
+2. 종합 판단:
+   - 결론: 중복이다 / 중복 아니다 / 확인 필요
+   - 신뢰도: 0.0-1.0
+   - 핵심 근거
+
+3. 추천 액션:
+   - 병합 / 개별 유지 / 사용자 확인
+
+(모든 쌍에 대해 반복)
+
+### 분석 요약
+- 확실한 중복: N개
+- 가능성 높은 중복: N개
+- 검토 필요: N개
+</thinking>
+
+분석 완료 후 JSON 결과:
 {{
   "analysis": [
     {{
@@ -285,10 +458,15 @@ async def ai_detect_duplicates(
       "row2": number,
       "is_duplicate": true/false,
       "confidence": 0.0-1.0,
-      "reason": "판단 근거"
-    }},
-    ...
-  ]
+      "reason": "판단 근거 요약",
+      "recommended_action": "merge/keep_separate/needs_review"
+    }}
+  ],
+  "summary": {{
+    "confirmed_duplicates": number,
+    "likely_duplicates": number,
+    "needs_review": number
+  }}
 }}"""
 
     try:
@@ -296,14 +474,18 @@ async def ai_detect_duplicates(
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a data quality expert. Analyze potential duplicate records."},
+                {"role": "system", "content": "You are a data quality expert. First show your thinking process in <thinking> tags, then provide the JSON result."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.1,
-            response_format={"type": "json_object"}
+            temperature=0.2,
+            max_tokens=4000
         )
 
-        ai_result = json.loads(response.choices[0].message.content)
+        content = response.choices[0].message.content
+        parsed = parse_thinking_response(content)
+
+        ai_result = parsed["result"]
+        thinking = parsed["thinking"]
 
         # Merge AI analysis with basic results
         ai_analysis_map = {
@@ -316,8 +498,146 @@ async def ai_detect_duplicates(
             if key in ai_analysis_map:
                 dup["ai_analysis"] = ai_analysis_map[key]
 
+        # Add thinking to the first result for UI display
+        if basic_duplicates:
+            basic_duplicates[0]["ai_thinking"] = thinking
+
         return basic_duplicates
 
     except Exception as e:
         print(f"AI duplicate detection error: {e}")
         return basic_duplicates
+
+
+async def analyze_data_quality(
+    data: list[dict],
+    field_mappings: list[dict],
+    object_types: list[str]
+) -> dict:
+    """
+    Use AI with Chain-of-Thought to analyze data quality before import.
+    Returns quality analysis with AI's reasoning process.
+    """
+    # Prepare data summary
+    sample_data = data[:10]
+    total_rows = len(data)
+
+    # Get mapped columns
+    mapped_fields = {m["source_column"]: m["target_field"] for m in field_mappings}
+
+    prompt = f"""당신은 CRM 데이터 품질 검증 전문가입니다.
+
+## 데이터 개요
+- 총 행 수: {total_rows}
+- 오브젝트 유형: {', '.join(object_types)}
+- 매핑된 필드: {json.dumps(mapped_fields, ensure_ascii=False)}
+
+## 샘플 데이터 (처음 10행)
+{json.dumps(sample_data, ensure_ascii=False, indent=2)}
+
+## 검증 과정
+
+<thinking>
+### 1. 필수 필드 검증
+각 오브젝트별 필수 필드 확인:
+- company: name 필수
+- people: name 필수
+- lead: name 필수, people_name 또는 company_name 중 하나 필수
+- deal: name 필수, people_name 또는 company_name 중 하나 필수
+
+Row by row 검사 (샘플 기준):
+- Row 1: [✅/❌] 필수 필드 상태
+- Row 2: ...
+
+### 2. 형식 검증
+- 이메일: xxx@xxx.xxx 형식 확인
+- 전화번호: 숫자와 하이픈만 있는지
+- URL: http/https로 시작하는지
+- 날짜: 유효한 날짜 형식인지
+
+발견된 형식 오류:
+- Row N의 "필드명": "값" → 오류 유형
+
+### 3. 데이터 일관성
+- 동일 필드의 값들이 일관된 형식인지
+- 이상치나 의심되는 값
+- 빈 값의 비율
+
+### 4. 잠재적 문제
+- 마이그레이션 시 발생할 수 있는 이슈
+- 자동 수정 가능한 항목
+- 사용자 확인이 필요한 항목
+
+### 5. 최종 판정
+- 정상: N개 (N%)
+- 오류: N개 (import 불가)
+- 경고: N개 (import 가능하나 확인 권장)
+</thinking>
+
+검증 결과 JSON:
+{{
+  "validation_passed": true/false,
+  "summary": {{
+    "total_rows": number,
+    "valid_rows": number,
+    "error_rows": number,
+    "warning_rows": number
+  }},
+  "errors": [
+    {{
+      "row": number,
+      "field": "필드명",
+      "value": "현재값",
+      "message": "오류 메시지",
+      "severity": "error"
+    }}
+  ],
+  "warnings": [
+    {{
+      "row": number,
+      "field": "필드명",
+      "value": "현재값",
+      "message": "경고 메시지",
+      "severity": "warning"
+    }}
+  ],
+  "auto_fixable": [
+    {{
+      "row": number,
+      "field": "필드명",
+      "current": "현재값",
+      "suggested": "수정 제안",
+      "fix_type": "format_phone/format_email/trim_whitespace"
+    }}
+  ],
+  "recommendations": ["전반적인 개선 권장사항"]
+}}"""
+
+    try:
+        openai_client = get_openai_client()
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a data quality expert. First show your thinking process in <thinking> tags, then provide the JSON result."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=4000
+        )
+
+        content = response.choices[0].message.content
+        parsed = parse_thinking_response(content)
+
+        result = parsed["result"]
+        result["thinking"] = parsed["thinking"]
+
+        return result
+    except Exception as e:
+        print(f"Data quality analysis error: {e}")
+        return {
+            "validation_passed": True,
+            "summary": {"total_rows": len(data), "valid_rows": len(data), "error_rows": 0, "warning_rows": 0},
+            "errors": [],
+            "warnings": [],
+            "error": str(e)
+        }
