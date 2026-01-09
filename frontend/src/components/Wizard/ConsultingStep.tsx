@@ -37,8 +37,24 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
       object_type: string;
       field_id: string;
       field_label: string;
+      field_type?: string;
+      field_type_reason?: string;
       reason: string;
     }>;
+    column_analysis?: {
+      total_columns: number;
+      columns_to_keep: Array<{
+        column_name: string;
+        recommended_type: string;
+        target_object?: string;
+        target_field?: string;
+        reason: string;
+      }>;
+      columns_to_skip: Array<{
+        column_name: string;
+        reason: string;
+      }>;
+    };
     confirmation_message: string;
   } | null>(null);
   const [chatStarted, setChatStarted] = useState(false);
@@ -209,6 +225,8 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
       objectType: f.object_type,
       fieldId: f.field_id,
       fieldLabel: f.field_label,
+      fieldType: f.field_type,
+      fieldTypeReason: f.field_type_reason,
       reason: f.reason,
     }));
 
@@ -216,6 +234,20 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
       businessType: 'B2B',
       recommendedObjectTypes: summaryData.recommended_objects,
       recommendedFields,
+      columnAnalysis: summaryData.column_analysis ? {
+        totalColumns: summaryData.column_analysis.total_columns,
+        columnsToKeep: summaryData.column_analysis.columns_to_keep.map(c => ({
+          columnName: c.column_name,
+          recommendedType: c.recommended_type,
+          targetObject: c.target_object,
+          targetField: c.target_field,
+          reason: c.reason,
+        })),
+        columnsToSkip: summaryData.column_analysis.columns_to_skip.map(c => ({
+          columnName: c.column_name,
+          reason: c.reason,
+        })),
+      } : undefined,
       answers: [],
     };
 
@@ -242,6 +274,28 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
       people: '고객',
       lead: '리드',
       deal: '딜',
+    };
+    return names[type] || type;
+  };
+
+  const getFieldTypeName = (type: string) => {
+    const names: Record<string, string> = {
+      text: '텍스트',
+      number: '숫자',
+      email: '이메일',
+      phone: '전화번호',
+      date: '날짜',
+      datetime: '날짜+시간',
+      url: 'URL',
+      select: '단일선택',
+      multiselect: '복수선택',
+      boolean: 'True/False',
+      textarea: '긴 텍스트',
+      user: '사용자',
+      users: '사용자(복수)',
+      relation: '연결',
+      pipeline: '파이프라인',
+      pipeline_stage: '파이프라인 단계',
     };
     return names[type] || type;
   };
@@ -305,15 +359,85 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
               <h4 className="font-medium text-slate-700 mb-2">추천 필드</h4>
               <div className="space-y-2">
                 {summaryData.recommended_fields.map((field, idx) => (
-                  <div key={idx} className="flex items-center gap-2 text-sm">
+                  <div key={idx} className="flex items-center gap-2 text-sm flex-wrap">
                     <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded">
                       {getObjectName(field.object_type)}
                     </span>
                     <span className="text-slate-700 font-medium">{field.field_label}</span>
+                    {field.field_type && (
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-600 rounded text-xs">
+                        {getFieldTypeName(field.field_type)}
+                      </span>
+                    )}
                     <span className="text-slate-500">- {field.reason}</span>
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Column Analysis */}
+          {summaryData.column_analysis && (
+            <div className="mb-4">
+              <h4 className="font-medium text-slate-700 mb-2">
+                컬럼 분석 결과 (총 {summaryData.column_analysis.total_columns}개)
+              </h4>
+
+              {/* Columns to keep */}
+              {summaryData.column_analysis.columns_to_keep.length > 0 && (
+                <div className="bg-green-50 rounded-lg p-3 border border-green-200 mb-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="font-medium text-green-800 text-sm">
+                      유지할 컬럼 ({summaryData.column_analysis.columns_to_keep.length}개)
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 text-sm">
+                    {summaryData.column_analysis.columns_to_keep.map((col, idx) => (
+                      <div key={idx} className="flex items-center gap-2 flex-wrap">
+                        <span className="text-green-800 font-medium">{col.column_name}</span>
+                        <span className="text-green-600">→</span>
+                        {col.target_object && (
+                          <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs">
+                            {getObjectName(col.target_object)}
+                          </span>
+                        )}
+                        <span className="px-1.5 py-0.5 bg-white text-green-700 rounded text-xs border border-green-200">
+                          {getFieldTypeName(col.recommended_type)}
+                        </span>
+                        <span className="text-green-600 text-xs">- {col.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Columns to skip */}
+              {summaryData.column_analysis.columns_to_skip.length > 0 && (
+                <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span className="font-medium text-amber-800 text-sm">
+                      제외 추천 컬럼 ({summaryData.column_analysis.columns_to_skip.length}개)
+                    </span>
+                  </div>
+                  <div className="space-y-1 text-sm">
+                    {summaryData.column_analysis.columns_to_skip.map((col, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <span className="text-amber-800 font-medium">{col.column_name}</span>
+                        <span className="text-amber-600 text-xs">- {col.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-amber-700 mt-2">
+                    * 제외 컬럼도 필요하다면 필드 매핑 단계에서 직접 매핑할 수 있습니다
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

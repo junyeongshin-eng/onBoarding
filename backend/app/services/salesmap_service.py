@@ -504,8 +504,8 @@ def get_default_fields(object_type: str) -> list:
             {"id": "subscription_start", "label": "구독 시작일", "type": "datetime", "required": False, "is_system": False, "editable": True},
             {"id": "owner", "label": "담당자", "type": "user", "required": False, "is_system": False, "editable": True},
             {"id": "followers", "label": "팔로워", "type": "users", "required": False, "is_system": False, "editable": True},
-            {"id": "pipeline", "label": "파이프라인", "type": "pipeline", "required": False, "is_system": False, "editable": True},
-            {"id": "pipeline_stage", "label": "파이프라인 단계", "type": "pipeline_stage", "required": False, "is_system": False, "editable": True},
+            {"id": "pipeline", "label": "파이프라인", "type": "pipeline", "required": True, "is_system": False, "editable": True},
+            {"id": "pipeline_stage", "label": "파이프라인 단계", "type": "pipeline_stage", "required": True, "is_system": False, "editable": True},
             {"id": "main_quote_products", "label": "메인 견적 상품 리스트", "type": "multiselect", "required": False, "is_system": False, "editable": True},
         ],
     }

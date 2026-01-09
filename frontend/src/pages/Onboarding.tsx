@@ -195,8 +195,13 @@ export function Onboarding() {
       case 3: // Upload
         return uploadedFile !== null;
       case 4: // Field Mapping
-        // At least one mapping required
-        return fieldMappings.length > 0;
+        // All required columns must be mapped (columns_to_skip are optional)
+        const allColumns = uploadedFile?.columns || [];
+        const skipColumns = consultingResult?.columnAnalysis?.columnsToSkip?.map(c => c.columnName) || [];
+        const requiredColumns = allColumns.filter(col => !skipColumns.includes(col));
+        const mappedColumns = fieldMappings.map(m => m.source_column);
+        const allRequiredMapped = requiredColumns.every(col => mappedColumns.includes(col));
+        return allRequiredMapped && requiredColumns.length > 0;
       case 5: // Review
         return true;
       case 6: // Validation - handled separately
@@ -418,6 +423,7 @@ export function Onboarding() {
             onMappingsChange={setFieldMappings}
             onCustomFieldsChange={setCustomFields}
             recommendedFields={consultingResult?.recommendedFields}
+            columnsToSkip={consultingResult?.columnAnalysis?.columnsToSkip?.map(c => c.columnName)}
           />
         ) : null;
       case 5:

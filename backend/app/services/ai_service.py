@@ -4,6 +4,7 @@ import re
 from openai import OpenAI
 from typing import Optional
 from difflib import SequenceMatcher
+from datetime import datetime
 
 # Initialize OpenAI client
 client: Optional[OpenAI] = None
@@ -17,6 +18,122 @@ def get_openai_client() -> OpenAI:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
         client = OpenAI(api_key=api_key)
     return client
+
+
+def analyze_column_types(data: list[dict], columns: list[str]) -> dict:
+    """
+    Analyze columns in the data to detect the most appropriate field type.
+    Returns a dict mapping column names to recommended field types and metadata.
+
+    Field types:
+    - text: General text
+    - number: Numeric values
+    - email: Email addresses
+    - phone: Phone numbers
+    - date: Date values
+    - datetime: Date with time
+    - url: URLs
+    - select: Limited set of values (single selection)
+    - multiselect: Multiple values (comma-separated)
+    - boolean: True/False values
+    """
+    result = {}
+
+    for col in columns:
+        values = [row.get(col) for row in data if row.get(col) is not None and str(row.get(col)).strip()]
+
+        if not values:
+            result[col] = {"type": "text", "reason": "빈 값", "unique_count": 0, "sample_values": []}
+            continue
+
+        str_values = [str(v).strip() for v in values]
+        unique_values = list(set(str_values))
+        unique_count = len(unique_values)
+        total_count = len(str_values)
+        sample_values = unique_values[:5]
+
+        # Initialize detection flags
+        detected_type = "text"
+        reason = "기본 텍스트"
+
+        # Check for boolean
+        bool_patterns = {'true', 'false', 'yes', 'no', '예', '아니오', 'y', 'n', '1', '0', 'o', 'x'}
+        lower_values = [v.lower() for v in str_values]
+        if unique_count <= 2 and all(v in bool_patterns for v in lower_values):
+            detected_type = "boolean"
+            reason = f"True/False 형태의 값 (고유값 {unique_count}개)"
+
+        # Check for email
+        elif all(re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', v) for v in str_values):
+            detected_type = "email"
+            reason = "이메일 형식"
+
+        # Check for phone number
+        elif all(re.match(r'^[\d\-\+\(\)\s]{8,}$', v) for v in str_values):
+            detected_type = "phone"
+            reason = "전화번호 형식"
+
+        # Check for URL
+        elif all(re.match(r'^https?://', v) for v in str_values):
+            detected_type = "url"
+            reason = "URL 형식"
+
+        # Check for date/datetime
+        else:
+            date_patterns = [
+                r'^\d{4}[-/]\d{1,2}[-/]\d{1,2}$',  # 2024-01-15
+                r'^\d{1,2}[-/]\d{1,2}[-/]\d{4}$',  # 15-01-2024
+                r'^\d{4}년\s*\d{1,2}월\s*\d{1,2}일$',  # 2024년 1월 15일
+            ]
+            datetime_patterns = [
+                r'^\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}',  # 2024-01-15 14:30
+                r'^\d{4}[-/]\d{1,2}[-/]\d{1,2}T\d{1,2}:\d{2}',  # 2024-01-15T14:30
+            ]
+
+            is_datetime = all(any(re.match(p, v) for p in datetime_patterns) for v in str_values)
+            is_date = all(any(re.match(p, v) for p in date_patterns) for v in str_values)
+
+            if is_datetime:
+                detected_type = "datetime"
+                reason = "날짜+시간 형식"
+            elif is_date:
+                detected_type = "date"
+                reason = "날짜 형식"
+
+            # Check for number
+            elif all(re.match(r'^-?[\d,]+\.?\d*$', v.replace(',', '')) for v in str_values):
+                detected_type = "number"
+                reason = "숫자 형식"
+
+            # Check for select/multiselect (limited unique values)
+            elif unique_count <= 10 and unique_count < total_count * 0.3:
+                # Check if values contain comma (multiselect)
+                if any(',' in v for v in str_values):
+                    detected_type = "multiselect"
+                    reason = f"복수 선택 가능 (고유값 {unique_count}개, 쉼표로 구분된 값 포함)"
+                else:
+                    detected_type = "select"
+                    reason = f"제한된 선택 옵션 (고유값 {unique_count}개 / 전체 {total_count}개)"
+
+            # Check for multiselect (comma-separated values)
+            elif any(',' in v for v in str_values):
+                split_values = []
+                for v in str_values:
+                    split_values.extend([x.strip() for x in v.split(',')])
+                split_unique = len(set(split_values))
+                if split_unique <= 20:
+                    detected_type = "multiselect"
+                    reason = f"복수 선택 (쉼표 구분, 개별 옵션 {split_unique}개)"
+
+        result[col] = {
+            "type": detected_type,
+            "reason": reason,
+            "unique_count": unique_count,
+            "total_count": total_count,
+            "sample_values": sample_values
+        }
+
+    return result
 
 
 def parse_thinking_response(content: str) -> dict:
@@ -158,7 +275,7 @@ async def auto_map_fields(
 <thinking>
 각 소스 컬럼을 하나씩 분석합니다:
 
-**[컬럼명]**
+[컬럼명]
 1. 컬럼명 해석: 이 이름이 무엇을 의미하는가?
 2. 샘플 데이터 분석:
    - 데이터 형태: 텍스트/숫자/날짜/이메일/전화번호 등
@@ -314,9 +431,20 @@ async def consulting_chat(
 3. 어떤 목적으로 데이터를 임포트하시나요?
 4. 기존에 CRM을 사용하셨나요?
 
-친근하고 전문적인 톤으로 대화하세요. 한국어로 답변하세요."""
+## 응답 형식
+- 마크다운 문법을 사용하지 마세요 (**, ##, ``` 등 금지)
+- 일반 텍스트로만 응답하세요
+- 친근하고 전문적인 톤으로 대화하세요
+- 한국어로 답변하세요"""
 
+    # Analyze column types if file context is provided
+    column_type_analysis = None
     if file_context:
+        columns = file_context.get('columns', [])
+        sample_data = file_context.get('sample_data', [])
+        if columns and sample_data:
+            column_type_analysis = analyze_column_types(sample_data, columns)
+
         file_info = f"""
 
 ## 업로드된 파일 정보
@@ -324,13 +452,79 @@ async def consulting_chat(
 - 컬럼: {', '.join(file_context.get('columns', [])[:10])}
 - 총 행 수: {file_context.get('total_rows', 0)}
 - 샘플 데이터: {json.dumps(file_context.get('sample_data', [])[:3], ensure_ascii=False)}"""
+
+        if column_type_analysis:
+            file_info += f"""
+
+## 컬럼별 필드 유형 분석 결과
+{json.dumps(column_type_analysis, ensure_ascii=False, indent=2)}
+
+### 필드 유형 설명
+- text: 일반 텍스트
+- number: 숫자 (금액, 수량 등)
+- email: 이메일 주소
+- phone: 전화번호
+- date: 날짜 (YYYY-MM-DD)
+- datetime: 날짜+시간
+- url: URL 주소
+- select: 단일 선택 (제한된 옵션)
+- multiselect: 복수 선택 (쉼표로 구분)
+- boolean: True/False"""
         system_prompt += file_info
 
     if is_summary_request:
         system_prompt += """
 
 ## 요약 요청
-대화 내용을 바탕으로 다음 JSON 형식으로 추천을 생성하세요:
+대화 내용을 바탕으로 다음 JSON 형식으로 추천을 생성하세요.
+
+### 세일즈맵 데이터 이관 필수 규칙 (반드시 준수!)
+
+#### 1. 오브젝트별 필수 필드
+- People (고객): "이름" 필드 필수
+- Organization (회사): "이름" 필드 필수
+- Lead (리드): "이름" 필드 필수 + 반드시 "연결된 고객 이름" 또는 "연결된 회사 이름" 중 하나 이상 필요
+- Deal (딜): "이름" 필드 필수 + 반드시 "연결된 고객 이름" 또는 "연결된 회사 이름" 중 하나 이상 필요
+
+#### 2. 딜/리드의 연결 관계 (매우 중요!)
+- 딜 또는 리드를 가져올 때 고객(People) 또는 회사(Organization)와 연결이 필수입니다
+- 연결 방법: 파일에 고객 이름이나 회사 이름 컬럼이 있어야 합니다
+- 딜/리드를 추천할 때는 반드시 people 또는 company도 함께 추천해야 합니다
+
+#### 3. 필드 이름 규칙
+- 각 필드는 "오브젝트명 - 필드명" 형식으로 매핑됩니다
+- 예: "People - 이름", "Organization - 이름", "Deal - 파이프라인", "Lead - 상태"
+
+### 컬럼 분석 원칙 (매우 중요!)
+
+#### 배타적 분류 규칙
+- 각 컬럼은 columns_to_keep 또는 columns_to_skip 중 하나에만 포함되어야 합니다
+- 절대로 같은 컬럼이 두 리스트에 동시에 나타나면 안됩니다
+- columns_to_keep + columns_to_skip = 전체 컬럼 수가 되어야 합니다
+
+#### 유지 대상 컬럼 (columns_to_keep - 적극적으로 유지):
+- 고객/회사 정보 (이름, 연락처, 이메일, 주소 등)
+- 비즈니스 데이터 (금액, 상태, 날짜, 메모 등)
+- 분류/태그 정보 (유형, 그룹, 카테고리 등)
+- 사용자가 직접 입력한 모든 데이터
+- 딜/리드 연결용 고객명, 회사명 컬럼
+
+#### 제외 대상 컬럼 (columns_to_skip - 명확한 경우에만):
+- 시스템 내부용 ID (auto-increment, UUID 등 의미 없는 식별자)
+- 완전히 빈 컬럼 (모든 값이 null/빈값)
+- 중복 컬럼 (동일한 데이터가 다른 이름으로 존재)
+- 임시/테스트 데이터 컬럼
+
+### 필드 유형 추천 규칙
+- 값이 제한된 경우 (10개 이하의 반복되는 값) → select (단일 선택)
+- 쉼표로 구분된 복수 값이 있는 경우 → multiselect (복수 선택)
+- 숫자만 있는 경우 → number
+- 날짜 형식인 경우 → date 또는 datetime
+- 이메일 형식 → email
+- 전화번호 형식 → phone
+- True/False, 예/아니오 등 → boolean
+- 그 외 → text
+
 {
   "summary": "사용자 비즈니스 요약 (1-2문장)",
   "recommended_objects": ["people", "deal"],
@@ -339,11 +533,37 @@ async def consulting_chat(
       "object_type": "people",
       "field_id": "customer_group",
       "field_label": "고객 그룹",
+      "field_type": "select",
+      "field_type_reason": "5개의 고정된 그룹 값만 존재",
       "reason": "추천 이유"
     }
   ],
-  "confirmation_message": "위 내용이 맞으시면 확인을 눌러주세요."
+  "column_analysis": {
+    "total_columns": 10,
+    "columns_to_keep": [
+      {
+        "column_name": "고객명",
+        "recommended_type": "text",
+        "target_object": "people",
+        "target_field": "name",
+        "reason": "고객 이름 - 필수 정보"
+      }
+    ],
+    "columns_to_skip": [
+      {
+        "column_name": "row_id",
+        "reason": "시스템 자동생성 ID - CRM에서 새로 생성됨"
+      }
+    ]
+  },
+  "confirmation_message": "위 내용이 맞으시면 확인을 눌러주세요. 제외 컬럼이 있다면 확인해주세요."
 }
+
+### 검증 체크리스트 (JSON 출력 전 확인)
+1. columns_to_keep과 columns_to_skip에 중복된 컬럼이 없는가?
+2. 딜/리드를 추천하면 people 또는 company도 함께 추천했는가?
+3. 딜/리드 추천 시 연결용 필드(연결된 고객 이름 또는 연결된 회사 이름)가 recommended_fields에 있는가?
+
 JSON만 응답하세요."""
 
     try:
@@ -427,7 +647,7 @@ async def ai_detect_duplicates(
 
 각 쌍에 대해:
 
-**Row {{row1}} vs Row {{row2}}**
+Row {{row1}} vs Row {{row2}}
 
 1. 필드별 비교:
    - 이름: "{{name1}}" vs "{{name2}}" → 동일인/다른 사람/불확실

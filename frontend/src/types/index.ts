@@ -141,13 +141,36 @@ export interface RecommendedField {
   objectType: string;
   fieldId: string;
   fieldLabel: string;
+  fieldType?: string; // 추천 필드 유형 (text, number, select, date 등)
+  fieldTypeReason?: string; // 필드 유형 추천 이유
   reason: string;
+}
+
+// Column analysis result
+export interface ColumnToKeep {
+  columnName: string;
+  recommendedType: string;
+  targetObject?: string;
+  targetField?: string;
+  reason: string;
+}
+
+export interface ColumnToSkip {
+  columnName: string;
+  reason: string;
+}
+
+export interface ColumnAnalysis {
+  totalColumns: number;
+  columnsToKeep: ColumnToKeep[];
+  columnsToSkip: ColumnToSkip[];
 }
 
 export interface ConsultingResult {
   businessType: string;
   recommendedObjectTypes: string[];
   recommendedFields: RecommendedField[];
+  columnAnalysis?: ColumnAnalysis; // 컬럼 분석 결과
   answers: ConsultingAnswer[];
 }
 

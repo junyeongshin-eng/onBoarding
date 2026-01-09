@@ -6,7 +6,6 @@ interface ExtendedCRMField extends CRMField {
   objectType: string;
   objectName: string;
   isCustom?: boolean;
-  needsCreation?: boolean; // Field recommended but doesn't exist in Salesmap yet
 }
 
 interface FieldMapperProps {
@@ -19,6 +18,7 @@ interface FieldMapperProps {
   onMappingsChange: (mappings: FieldMapping[]) => void;
   onCustomFieldsChange: (fields: ExtendedCRMField[]) => void;
   recommendedFields?: RecommendedField[];
+  columnsToSkip?: string[]; // 컨설팅에서 제외 추천된 컬럼
 }
 
 const OBJECT_NAMES: Record<string, string> = {
@@ -76,6 +76,7 @@ export function FieldMapper({
   onMappingsChange,
   onCustomFieldsChange,
   recommendedFields = [],
+  columnsToSkip = [],
 }: FieldMapperProps) {
   const [allFields, setAllFields] = useState<ExtendedCRMField[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -107,33 +108,8 @@ export function FieldMapper({
             required: f.required,
             objectType: objType,
             objectName: OBJECT_NAMES[objType] || objType,
-            needsCreation: false,
           }));
         fieldsByObject.push(...extendedFields);
-      }
-
-      // Add recommended fields that don't exist in Salesmap
-      for (const rf of recommendedFields) {
-        const existingFields = salesmapFields[rf.objectType] || [];
-        const existsInSalesmap = existingFields.some(f => f.id === rf.fieldId);
-
-        if (!existsInSalesmap) {
-          // Check if already added
-          const alreadyAdded = fieldsByObject.some(
-            f => f.objectType === rf.objectType && f.id === rf.fieldId
-          );
-          if (!alreadyAdded) {
-            fieldsByObject.push({
-              id: rf.fieldId,
-              label: rf.fieldLabel,
-              type: 'text', // Default type for recommended fields
-              required: false,
-              objectType: rf.objectType,
-              objectName: OBJECT_NAMES[rf.objectType] || rf.objectType,
-              needsCreation: true,
-            });
-          }
-        }
       }
 
       // Add custom fields
@@ -227,27 +203,6 @@ export function FieldMapper({
           }))
       );
 
-      // Also include recommended fields that need to be created
-      for (const rf of recommendedFields) {
-        const existingFields = salesmapFields[rf.objectType] || [];
-        const existsInSalesmap = existingFields.some(f => f.id === rf.fieldId);
-
-        if (!existsInSalesmap) {
-          const alreadyAdded = availableFields.some(
-            f => f.object_type === rf.objectType && f.id === rf.fieldId
-          );
-          if (!alreadyAdded) {
-            availableFields.push({
-              key: `${rf.objectType}.${rf.fieldId}`,
-              id: rf.fieldId,
-              label: rf.fieldLabel,
-              object_type: rf.objectType,
-              description: `${rf.fieldLabel} (생성 필요)`,
-            });
-          }
-        }
-      }
-
       const result = await autoMapFields(sourceColumns, sampleData, objectTypes, availableFields);
 
       if (result.error) {
@@ -255,11 +210,11 @@ export function FieldMapper({
         return;
       }
 
-      // Apply AI mappings (including fields that need to be created)
+      // Apply AI mappings
       const newMappings: FieldMapping[] = [];
       for (const [sourceCol, targetField] of Object.entries(result.mappings)) {
         if (targetField) {
-          // Verify the target field exists in allFields (includes needsCreation fields)
+          // Verify the target field exists in allFields
           const [objType, fieldId] = targetField.split('.');
           const fieldExists = allFields.some(
             f => f.objectType === objType && f.id === fieldId
@@ -337,60 +292,22 @@ export function FieldMapper({
             비즈니스 유형에 따라 추천된 필드입니다. 아래 필드들을 매핑해주세요.
           </p>
           <div className="flex flex-wrap gap-2">
-            {recommendedFields.map((rf) => {
-              // Check if the field exists in Salesmap
-              const fields = salesmapFields[rf.objectType] || [];
-              const existsInSalesmap = fields.some(f => f.id === rf.fieldId);
-
-              return (
-                <div
-                  key={`${rf.objectType}.${rf.fieldId}`}
-                  className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${
-                    existsInSalesmap
-                      ? 'bg-green-50 border border-green-200 text-green-700'
-                      : 'bg-orange-50 border border-orange-200 text-orange-700'
-                  }`}
-                  title={rf.reason}
-                >
-                  {existsInSalesmap ? (
-                    <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                  )}
-                  <span className="font-medium">{OBJECT_NAMES[rf.objectType]}</span>
-                  <span>&gt;</span>
-                  <span>{rf.fieldLabel}</span>
-                  {!existsInSalesmap && (
-                    <span className="text-xs bg-orange-100 px-1.5 py-0.5 rounded">
-                      세일즈맵에서 생성 필요
-                    </span>
-                  )}
-                </div>
-              );
-            })}
+            {recommendedFields.map((rf) => (
+              <div
+                key={`${rf.objectType}.${rf.fieldId}`}
+                className="px-3 py-2 rounded-lg text-sm flex items-center gap-2 bg-green-50 border border-green-200 text-green-700"
+                title={rf.reason}
+              >
+                <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="font-medium">{OBJECT_NAMES[rf.objectType]}</span>
+                <span>&gt;</span>
+                <span>{rf.fieldLabel}</span>
+              </div>
+            ))}
           </div>
 
-          {/* Warning for missing fields */}
-          {recommendedFields.some(rf => {
-            const fields = salesmapFields[rf.objectType] || [];
-            return !fields.some(f => f.id === rf.fieldId);
-          }) && (
-            <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-              <p className="text-sm text-orange-700 flex items-start gap-2">
-                <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <span>
-                  일부 추천 필드가 세일즈맵에 없습니다. 해당 필드를 세일즈맵에서 먼저 생성하거나,
-                  아래 "새 필드 추가" 버튼으로 커스텀 필드를 만들어 매핑할 수 있습니다.
-                </span>
-              </p>
-            </div>
-          )}
         </div>
       )}
 
@@ -478,12 +395,32 @@ export function FieldMapper({
 
       {/* Status and AI Auto-Map Button */}
       <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-slate-600">
-            매핑됨: {mappings.length} / {sourceColumns.length} 열
-          </span>
+        <div className="flex items-center gap-4 flex-wrap">
+          {(() => {
+            const requiredCols = sourceColumns.filter(col => !columnsToSkip.includes(col));
+            const optionalCols = sourceColumns.filter(col => columnsToSkip.includes(col));
+            const mappedRequiredCols = requiredCols.filter(col => mappings.some(m => m.source_column === col));
+            const mappedOptionalCols = optionalCols.filter(col => mappings.some(m => m.source_column === col));
+            const allRequiredMapped = mappedRequiredCols.length === requiredCols.length;
+
+            return (
+              <>
+                <span className={`text-sm font-medium ${allRequiredMapped ? 'text-green-600' : 'text-red-600'}`}>
+                  필수 컬럼: {mappedRequiredCols.length} / {requiredCols.length}
+                  {!allRequiredMapped && (
+                    <span className="ml-1">({requiredCols.length - mappedRequiredCols.length}개 미매핑)</span>
+                  )}
+                </span>
+                {optionalCols.length > 0 && (
+                  <span className="text-sm text-slate-500">
+                    선택 컬럼: {mappedOptionalCols.length} / {optionalCols.length}
+                  </span>
+                )}
+              </>
+            );
+          })()}
           <span className={`text-sm ${mappedRequiredFields.length === requiredFields.length ? 'text-green-600' : 'text-amber-600'}`}>
-            필수 항목: {mappedRequiredFields.length} / {requiredFields.length}
+            필수 필드: {mappedRequiredFields.length} / {requiredFields.length}
           </span>
         </div>
         <button
@@ -579,10 +516,32 @@ export function FieldMapper({
       <div className="space-y-3">
         {sourceColumns.map((col) => {
           const confidence = aiConfidence[col];
+          const isMapped = mappings.some(m => m.source_column === col);
+          const isOptional = columnsToSkip.includes(col);
+
+          // Determine border/background color
+          let borderClass = 'border-slate-200';
+          let bgClass = 'bg-white';
+          if (!isMapped) {
+            if (isOptional) {
+              borderClass = 'border-amber-300';
+              bgClass = 'bg-amber-50';
+            } else {
+              borderClass = 'border-red-400';
+              bgClass = 'bg-red-50';
+            }
+          }
+
           return (
-            <div key={col} className="flex items-center gap-4 p-3 bg-white border border-slate-200 rounded-lg">
-              <div className="flex-1 min-w-0">
+            <div key={col} className={`flex items-center gap-4 p-3 border rounded-lg ${borderClass} ${bgClass}`}>
+              <div className="flex-1 min-w-0 flex items-center gap-2">
                 <span className="font-medium text-slate-700 truncate block">{col}</span>
+                {isOptional && (
+                  <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-xs rounded">선택</span>
+                )}
+                {!isMapped && !isOptional && (
+                  <span className="px-1.5 py-0.5 bg-red-100 text-red-600 text-xs rounded">필수</span>
+                )}
               </div>
               <div className="flex items-center text-slate-400 flex-shrink-0">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -593,9 +552,11 @@ export function FieldMapper({
                 <select
                   value={getMappedField(col)}
                   onChange={(e) => handleMappingChange(col, e.target.value)}
-                  className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                  className={`flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm ${
+                    isMapped ? 'border-slate-300' : (isOptional ? 'border-amber-300' : 'border-red-400')
+                  }`}
                 >
-                  <option value="">-- 이 열 건너뛰기 --</option>
+                  <option value="">{isOptional ? '-- 건너뛰기 (선택) --' : '-- 필드 선택 (필수) --'}</option>
                   {objectTypes.map((objType) => (
                     <optgroup key={objType} label={OBJECT_NAMES[objType]}>
                       {fieldsByObject[objType]?.map((field) => {
@@ -610,7 +571,6 @@ export function FieldMapper({
                             {field.required ? ' *' : ''}
                             {field.unique ? ' (고유값)' : ''}
                             {field.isCustom ? ' [커스텀]' : ''}
-                            {field.needsCreation ? ' ⚠️생성필요' : ''}
                             {isFieldUsed(fieldKey, col) ? ' (사용됨)' : ''}
                           </option>
                         );
@@ -724,6 +684,64 @@ export function FieldMapper({
         </div>
       )}
 
+      {/* Unmapped required columns warning */}
+      {(() => {
+        const requiredCols = sourceColumns.filter(col => !columnsToSkip.includes(col));
+        const unmappedRequired = requiredCols.filter(col => !mappings.some(m => m.source_column === col));
+
+        if (unmappedRequired.length === 0) return null;
+
+        return (
+          <div className="p-4 bg-red-50 border border-red-300 rounded-lg">
+            <div className="flex items-start gap-2">
+              <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <p className="font-medium text-red-800">
+                  필수 컬럼을 매핑해야 합니다 ({unmappedRequired.length}개 미매핑)
+                </p>
+                <p className="text-sm text-red-700 mt-1">
+                  데이터 누락을 방지하기 위해 필수 컬럼을 매핑해주세요.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {unmappedRequired.map(col => (
+                    <span key={col} className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded">
+                      {col}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* All required columns mapped success message */}
+      {(() => {
+        const requiredCols = sourceColumns.filter(col => !columnsToSkip.includes(col));
+        const allRequiredMapped = requiredCols.every(col => mappings.some(m => m.source_column === col));
+        const skippedCount = columnsToSkip.filter(col => !mappings.some(m => m.source_column === col)).length;
+
+        if (!allRequiredMapped || requiredCols.length === 0) return null;
+
+        return (
+          <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
+            <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            <span className="text-green-700 font-medium">
+              필수 컬럼이 모두 매핑되었습니다 ({requiredCols.length}개)
+              {skippedCount > 0 && (
+                <span className="text-slate-500 font-normal ml-2">
+                  (선택 컬럼 {skippedCount}개 건너뜀)
+                </span>
+              )}
+            </span>
+          </div>
+        );
+      })()}
+
       {/* Required fields warning */}
       {mappedRequiredFields.length < requiredFields.length && (
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
@@ -735,45 +753,6 @@ export function FieldMapper({
         </div>
       )}
 
-      {/* Fields that need to be created warning */}
-      {(() => {
-        const fieldsNeedingCreation = mappings
-          .map(m => {
-            const [objType, fieldId] = m.target_field.split('.');
-            return allFields.find(f => f.objectType === objType && f.id === fieldId && f.needsCreation);
-          })
-          .filter(Boolean) as ExtendedCRMField[];
-
-        if (fieldsNeedingCreation.length === 0) return null;
-
-        return (
-          <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
-            <div className="flex items-start gap-2">
-              <svg className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              <div>
-                <p className="font-medium text-orange-800 mb-2">
-                  아래 필드는 세일즈맵에서 먼저 생성해야 합니다:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {fieldsNeedingCreation.map(field => (
-                    <span
-                      key={`${field.objectType}.${field.id}`}
-                      className="px-2 py-1 bg-orange-100 text-orange-700 text-sm rounded"
-                    >
-                      {OBJECT_NAMES[field.objectType]} &gt; {field.label}
-                    </span>
-                  ))}
-                </div>
-                <p className="text-sm text-orange-700 mt-2">
-                  세일즈맵 설정에서 해당 필드를 생성한 후 가져오기를 진행하세요.
-                </p>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }
