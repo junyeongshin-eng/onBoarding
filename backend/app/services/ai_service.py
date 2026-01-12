@@ -483,18 +483,29 @@ async def consulting_chat(
 #### 1. 오브젝트별 필수 조건 및 유니크 값
 - People (고객): 이름 필수, 이메일이 유니크 값 (중복 불가)
 - Organization (회사): 이름 필수, 이름이 유니크 값 (중복 불가)
-- Lead (리드): 이름 필수, 고객 또는 회사와 반드시 1개 이상 연결 필수
-- Deal (딜): 이름 필수, 고객 또는 회사와 반드시 1개 이상 연결 필수, 파이프라인 및 파이프라인 단계 필수
+- Lead (리드): 이름 필수
+- Deal (딜): 이름 필수, 파이프라인 및 파이프라인 단계 필수
 
-#### 2. 리드 vs 딜 사용 가이드 (중요!)
-- 리드(Lead): 마케팅 단계에서 사용 - 잠재 고객 발굴, 초기 문의, 마케팅 캠페인 응답 등
-- 딜(Deal): 영업팀 단계에서 사용 - 본격적인 영업 진행, 견적/계약, 수주 관리 등
-- 마케팅에서 영업으로 넘어갈 때 리드 → 딜로 전환
+#### 2. 오브젝트 자동 연결 (중요!)
+- 같은 행(row)에 있는 오브젝트들은 자동으로 연결됩니다
+- 예: 한 행에 "고객 - 이름", "딜 - 이름"이 있으면 해당 고객과 딜이 자동 연결
+- 별도의 "연결된 고객 이름" 같은 필드는 필요 없습니다!
+- 딜/리드를 사용하려면 같은 행에 고객 또는 회사 데이터가 있어야 합니다
 
-#### 3. 딜/리드의 연결 관계 (매우 중요!)
-- 딜 또는 리드를 가져올 때 고객(People) 또는 회사(Organization)와 연결이 필수입니다
-- 연결 방법: 파일에 고객 이름이나 회사 이름 컬럼이 있어야 합니다
-- 딜/리드를 추천할 때는 반드시 people 또는 company도 함께 추천해야 합니다
+#### 3. 필드 이름 형식 (매우 중요!)
+- 모든 필드는 "오브젝트 - 필드명" 형식으로 매핑됩니다
+- 예시:
+  - 고객 - 이름 (O) / 고객 이름 (X)
+  - 고객 - 이메일 (O) / 이메일 (X)
+  - 딜 - 이름 (O) / 딜 이름 (X)
+  - 딜 - 금액 (O) / 거래 금액 (X)
+  - 회사 - 이름 (O) / 회사명 (X)
+- field_label에는 "오브젝트 - 필드명" 형식을 사용하세요
+
+#### 4. 리드 vs 딜 사용 가이드
+- 리드(Lead): 마케팅 단계에서 사용 - 잠재 고객 발굴, 초기 문의
+- 딜(Deal): 영업팀 단계에서 사용 - 본격적인 영업 진행, 견적/계약
+- 딜/리드를 추천할 때는 반드시 people 또는 company도 함께 추천 (같은 행 연결용)
 
 ### 세일즈맵 시스템 필드 (수정 가능) - 최대한 시스템 필드 활용!
 
@@ -528,7 +539,6 @@ async def consulting_chat(
 - 이름 (text) - 필수
 - 파이프라인 (select) - 필수
 - 파이프라인 단계 (select) - 필수
-- 연결된 고객 이름 / 연결된 회사 이름 - 둘 중 하나 필수
 - 금액 (number)
 - 상태 (select)
 - 팀 (users)
@@ -549,7 +559,6 @@ async def consulting_chat(
 - 이름 (text) - 필수
 - 파이프라인 (select)
 - 파이프라인 단계 (select)
-- 연결된 고객 이름 / 연결된 회사 이름 - 둘 중 하나 필수
 - 금액 (number)
 - 상태 (select)
 - 팀 (users)
@@ -588,30 +597,38 @@ async def consulting_chat(
 - 팀/팔로워 → users
 - 그 외 → text
 
-### 컬럼 분석 원칙 (매우 중요!)
+### 컬럼 분석 원칙 (가장 중요!!!)
+
+#### 기본 원칙: 모든 컬럼을 유지! (DEFAULT = KEEP)
+- 기본적으로 모든 컬럼은 columns_to_keep에 포함됩니다
+- 데이터 손실을 방지하기 위해 가능한 모든 컬럼을 이관합니다
+- 27개 컬럼이 있으면 최소 25개 이상은 columns_to_keep에 있어야 합니다
+- columns_to_skip은 정말 명백한 경우에만 사용합니다 (2-3개 이하)
 
 #### 배타적 분류 규칙
 - 각 컬럼은 columns_to_keep 또는 columns_to_skip 중 하나에만 포함되어야 합니다
 - 절대로 같은 컬럼이 두 리스트에 동시에 나타나면 안됩니다
 - columns_to_keep + columns_to_skip = 전체 컬럼 수가 되어야 합니다
+- columns_to_keep이 전체의 90% 이상이어야 합니다!
 
 #### 시스템 필드 우선 매칭 (중요!)
 - 가능하면 시스템 필드에 먼저 매핑하세요
-- 시스템 필드에 없는 데이터만 커스텀 필드로 추천하세요
+- 시스템 필드에 없는 데이터는 커스텀 필드로 매핑하세요 (제외하지 마세요!)
 - target_field에 시스템 필드 이름을 정확히 매칭하세요
 
-#### 유지 대상 컬럼 (columns_to_keep - 적극적으로 유지):
-- 고객/회사 정보 (이름, 연락처, 이메일, 주소 등)
-- 비즈니스 데이터 (금액, 상태, 날짜, 메모 등)
-- 분류/태그 정보 (유형, 그룹, 카테고리 등)
+#### 유지 대상 컬럼 (columns_to_keep - 거의 모든 컬럼!):
+- 모든 고객/회사 정보 (이름, 연락처, 이메일, 주소 등)
+- 모든 비즈니스 데이터 (금액, 상태, 날짜, 메모 등)
+- 모든 분류/태그 정보 (유형, 그룹, 카테고리 등)
 - 사용자가 직접 입력한 모든 데이터
 - 딜/리드 연결용 고객명, 회사명 컬럼
+- 용도를 알 수 없어도 일단 유지! (커스텀 필드로 이관)
 
-#### 제외 대상 컬럼 (columns_to_skip - 명확한 경우에만):
-- 시스템 내부용 ID (auto-increment, UUID 등 의미 없는 식별자)
-- 완전히 빈 컬럼 (모든 값이 null/빈값)
-- 중복 컬럼 (동일한 데이터가 다른 이름으로 존재)
-- 임시/테스트 데이터 컬럼
+#### 제외 대상 컬럼 (columns_to_skip - 극히 제한적으로만!):
+- 시스템 내부용 ID (auto-increment, UUID 등) - 숫자만 있고 의미 없는 식별자인 경우만
+- 100% 빈 컬럼 (모든 행이 완전히 비어있는 경우만)
+- 정확히 동일한 데이터가 다른 컬럼에 이미 존재하는 경우
+- 주의: 애매하면 제외하지 말고 유지하세요!
 
 {
   "summary": "사용자 비즈니스 요약 (1-2문장)",
@@ -620,10 +637,18 @@ async def consulting_chat(
     {
       "object_type": "people",
       "field_id": "source",
-      "field_label": "소스",
+      "field_label": "고객 - 소스",
       "field_type": "select",
       "field_type_reason": "5개의 고정된 소스 값만 존재하여 단일 선택 필드 적합",
       "reason": "고객 유입 경로 관리를 위한 시스템 필드"
+    },
+    {
+      "object_type": "deal",
+      "field_id": "amount",
+      "field_label": "딜 - 금액",
+      "field_type": "number",
+      "field_type_reason": "숫자 형식의 거래 금액",
+      "reason": "거래 금액 관리를 위한 시스템 필드"
     }
   ],
   "column_analysis": {
@@ -633,15 +658,22 @@ async def consulting_chat(
         "column_name": "고객명",
         "recommended_type": "text",
         "target_object": "people",
-        "target_field": "이름",
+        "target_field": "고객 - 이름",
         "reason": "고객 이름 - 필수 시스템 필드"
       },
       {
         "column_name": "이메일주소",
         "recommended_type": "email",
         "target_object": "people",
-        "target_field": "이메일",
+        "target_field": "고객 - 이메일",
         "reason": "이메일 - 유니크 시스템 필드"
+      },
+      {
+        "column_name": "거래금액",
+        "recommended_type": "number",
+        "target_object": "deal",
+        "target_field": "딜 - 금액",
+        "reason": "딜 금액 시스템 필드"
       }
     ],
     "columns_to_skip": [
@@ -654,13 +686,15 @@ async def consulting_chat(
   "confirmation_message": "위 내용이 맞으시면 확인을 눌러주세요. 제외 컬럼이 있다면 확인해주세요."
 }
 
-### 검증 체크리스트 (JSON 출력 전 확인)
-1. columns_to_keep과 columns_to_skip에 중복된 컬럼이 없는가?
-2. 딜/리드를 추천하면 people 또는 company도 함께 추천했는가?
-3. 딜 추천 시 파이프라인/파이프라인 단계 필드도 추천했는가?
-4. 딜/리드 추천 시 연결용 필드(연결된 고객 이름 또는 연결된 회사 이름)가 recommended_fields에 있는가?
-5. 시스템 필드에 매핑 가능한 컬럼은 시스템 필드로 매핑했는가?
-6. field_type이 올바른 유형인가? (text, number, email, phone, date, datetime, select, multiselect, boolean, user, users, file, url)
+### 검증 체크리스트 (JSON 출력 전 반드시 확인!)
+1. columns_to_keep + columns_to_skip = 전체 컬럼 수인가? (모든 컬럼이 포함되어야 함!)
+2. columns_to_keep이 전체의 90% 이상인가? (대부분의 컬럼은 유지해야 함!)
+3. columns_to_keep과 columns_to_skip에 중복된 컬럼이 없는가?
+4. 딜/리드를 추천하면 people 또는 company도 함께 추천했는가? (같은 행 자동 연결용)
+5. 딜 추천 시 파이프라인/파이프라인 단계 필드 매핑이 있는가?
+6. field_label이 "오브젝트 - 필드명" 형식인가? (예: "고객 - 이름", "딜 - 금액")
+7. 시스템 필드에 매핑 가능한 컬럼은 시스템 필드로 매핑했는가?
+8. field_type이 올바른 유형인가? (text, number, email, phone, date, datetime, select, multiselect, boolean, user, users, file, url)
 
 JSON만 응답하세요."""
 

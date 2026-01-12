@@ -82,24 +82,8 @@ export function Onboarding() {
       }
     }
 
-    // Check required connection fields for lead/deal
-    for (const objType of objectTypes) {
-      if (objType === 'lead' || objType === 'deal') {
-        const availableFields = salesmapFieldsMap[objType] || [];
-        const hasPeopleName = availableFields.some(f => f.id === 'people_name' || f.label === '연결된 고객 이름');
-        const hasCompanyName = availableFields.some(f => f.id === 'company_name' || f.label === '연결된 회사 이름');
-
-        if (!hasPeopleName && !hasCompanyName) {
-          // Add both as options - user needs at least one
-          missing.push({
-            objectType: objType,
-            fieldId: 'people_name',
-            fieldLabel: '연결된 고객 이름',
-            reason: `${objType === 'lead' ? '리드' : '딜'}는 고객 또는 회사와 연결이 필수입니다`,
-          });
-        }
-      }
-    }
+    // Note: 같은 행에 있는 오브젝트들은 자동으로 연결되므로
+    // "연결된 고객 이름" 같은 별도의 연결 필드는 필요 없음
 
     return missing;
   }, []);

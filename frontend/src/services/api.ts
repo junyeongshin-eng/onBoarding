@@ -1,4 +1,12 @@
-import type { UploadResponse, ObjectType, ObjectFieldsResponse, ImportRequest, ImportResponse, ValidationResult, AutoMapResponse, DuplicateDetectionResponse, FieldMapping, ApiKeyValidationResponse, FetchFieldsResponse } from '../types';
+import type {
+  UploadResponse, ObjectType, ObjectFieldsResponse, ImportRequest, ImportResponse,
+  ValidationResult, AutoMapResponse, DuplicateDetectionResponse, FieldMapping,
+  ApiKeyValidationResponse, FetchFieldsResponse,
+  // Wrapper 아키텍처 타입
+  TriageRequest, TriageResponse, MappingRequest, MappingResponse,
+  ExportResponse, AnalyzeResponse,
+  TriageColumnKeep, SalesmapObjectType, SalesmapField, MappingFieldMapping,
+} from '../types';
 
 // In development, Vite proxy handles /api -> localhost:8000
 // In production, use the VITE_API_URL environment variable
@@ -335,4 +343,176 @@ export async function consultingChat(
   }
 
   return response.json();
+}
+
+// ============================================================================
+// Wrapper 아키텍처 API (Triage, Mapping, Export)
+// ============================================================================
+
+/**
+ * 파일 분석 API
+ * 컬럼 통계 및 제외 후보 식별
+ */
+export async function analyzeFile(
+  data: Record<string, unknown>[],
+  sampleCount: number = 5
+): Promise<AnalyzeResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/ai/analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data,
+        sample_count: sampleCount,
+      }),
+    });
+  } catch (e) {
+    throw new Error('파일 분석 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('파일 분석 실패');
+  }
+
+  return response.json();
+}
+
+/**
+ * Triage API
+ * 컬럼 분류 (유지/제외)
+ */
+export async function triageColumns(
+  columns: string[],
+  sampleData: Record<string, unknown>[],
+  businessContext?: string
+): Promise<TriageResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/ai/triage`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        columns,
+        sample_data: sampleData,
+        business_context: businessContext,
+      } as TriageRequest),
+    });
+  } catch (e) {
+    throw new Error('컬럼 분류 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('컬럼 분류 실패');
+  }
+
+  return response.json();
+}
+
+/**
+ * Mapping API
+ * 필드 매핑
+ */
+export async function mapFields(
+  columnsToKeep: TriageColumnKeep[],
+  objectTypes: SalesmapObjectType[],
+  availableFields: Record<string, SalesmapField[]>,
+  sampleData: Record<string, unknown>[]
+): Promise<MappingResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/ai/map`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        columns_to_keep: columnsToKeep,
+        object_types: objectTypes,
+        available_fields: availableFields,
+        sample_data: sampleData,
+      } as MappingRequest),
+    });
+  } catch (e) {
+    throw new Error('필드 매핑 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('필드 매핑 실패');
+  }
+
+  return response.json();
+}
+
+/**
+ * Export API
+ * 데이터 내보내기
+ */
+export async function exportData(
+  data: Record<string, unknown>[],
+  mappings: MappingFieldMapping[],
+  objectTypes: SalesmapObjectType[],
+  format: 'xlsx' | 'csv' = 'xlsx',
+  includeSummary: boolean = true
+): Promise<ExportResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/export`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data,
+        mappings,
+        object_types: objectTypes,
+        format,
+        include_summary: includeSummary,
+      }),
+    });
+  } catch (e) {
+    throw new Error('내보내기 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('내보내기 실패');
+  }
+
+  return response.json();
+}
+
+/**
+ * 파일 다운로드
+ */
+export async function downloadExport(downloadUrl: string): Promise<void> {
+  const response = await fetch(`${API_BASE}${downloadUrl}`);
+
+  if (!response.ok) {
+    throw new Error('파일 다운로드 실패');
+  }
+
+  const blob = await response.blob();
+  const contentDisposition = response.headers.get('Content-Disposition');
+  let filename = 'salesmap_export.xlsx';
+
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename="(.+)"/);
+    if (match) {
+      filename = match[1];
+    }
+  }
+
+  // Create download link
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
 }

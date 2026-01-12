@@ -225,14 +225,14 @@ export function ObjectSelector({
               </svg>
             </div>
             <div>
-              <h4 className="font-semibold text-orange-800">연결 오브젝트가 필요합니다</h4>
+              <h4 className="font-semibold text-orange-800">연결할 오브젝트를 선택해주세요</h4>
               <p className="text-sm text-orange-700 mt-1">
                 {selectedTypes.includes('deal') && selectedTypes.includes('lead')
                   ? '딜과 리드는'
                   : selectedTypes.includes('deal')
                   ? '딜은'
                   : '리드는'
-                } 고객 또는 회사와 연결되어야 합니다.
+                } 같은 행에 있는 고객 또는 회사와 자동으로 연결됩니다.
                 <br />
                 <span className="font-medium">회사</span> 또는 <span className="font-medium">고객</span> 중 하나 이상을 선택해주세요.
               </p>
@@ -266,13 +266,13 @@ export function ObjectSelector({
             {selectedTypes.includes('lead') && (
               <div className="flex items-start gap-2 text-amber-700">
                 <span className="font-medium min-w-[60px]">리드:</span>
-                <span>'연결된 고객 이름' 또는 '연결된 회사 이름' 필드 중 하나 필수</span>
+                <span>'이름' 필드 필수 (헤더: <code className="bg-amber-100 px-1 rounded">Lead - 이름</code>)</span>
               </div>
             )}
             {selectedTypes.includes('deal') && (
               <div className="flex items-start gap-2 text-amber-700">
                 <span className="font-medium min-w-[60px]">딜:</span>
-                <span>'연결된 고객 이름' 또는 '연결된 회사 이름' 필드 중 하나 필수</span>
+                <span>'이름', '파이프라인', '파이프라인 단계' 필수</span>
               </div>
             )}
           </div>
