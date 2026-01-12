@@ -427,6 +427,7 @@ export function Onboarding() {
             onCustomFieldsChange={setCustomFields}
             recommendedFields={consultingResult?.recommendedFields}
             columnsToSkip={consultingResult?.columnAnalysis?.columnsToSkip?.map(c => c.columnName)}
+            columnsToKeep={consultingResult?.columnAnalysis?.columnsToKeep}
           />
         ) : null;
       case 5:
