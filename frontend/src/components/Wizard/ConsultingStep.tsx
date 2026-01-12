@@ -80,53 +80,107 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
     };
   }, [uploadedFile, fileData]);
 
-  // Generate suggested insights based on file analysis
+  // Generate suggested insights based on actual file analysis
   const generateSuggestedInsights = useCallback((columns: string[], sampleData: Record<string, unknown>[]) => {
     const insights: SuggestedInsight[] = [];
+    const totalRows = sampleData.length;
 
-    // Check for common column patterns
-    const hasLead = columns.some(c => c.includes('리드') || c.toLowerCase().includes('lead'));
-    const hasOrg = columns.some(c => c.includes('조직') || c.includes('회사') || c.toLowerCase().includes('company'));
-    const hasPeople = columns.some(c => c.includes('고객') || c.toLowerCase().includes('people') || c.toLowerCase().includes('customer'));
-    const hasDeal = columns.some(c => c.includes('딜') || c.includes('거래') || c.toLowerCase().includes('deal'));
+    // Detect object types from column prefixes (e.g., "Organization - 이름", "Lead - 출처")
+    const objectPrefixes: Record<string, string[]> = {};
+    columns.forEach(col => {
+      const match = col.match(/^(Organization|Lead|People|Deal|Company|회사|리드|고객|딜)\s*-\s*/i);
+      if (match) {
+        const prefix = match[1].toLowerCase();
+        const normalizedPrefix =
+          ['organization', 'company', '회사'].includes(prefix) ? 'company' :
+          ['people', '고객'].includes(prefix) ? 'people' :
+          ['lead', '리드'].includes(prefix) ? 'lead' :
+          ['deal', '딜'].includes(prefix) ? 'deal' : prefix;
+        if (!objectPrefixes[normalizedPrefix]) objectPrefixes[normalizedPrefix] = [];
+        objectPrefixes[normalizedPrefix].push(col);
+      }
+    });
+
+    const objectTypes = Object.keys(objectPrefixes);
+    const objectNames: Record<string, string> = {
+      company: '회사', people: '고객', lead: '리드', deal: '딜'
+    };
+
+    // 1. Object structure insight
+    if (objectTypes.length > 0) {
+      const objectList = objectTypes.map(t => objectNames[t] || t).join(', ');
+      insights.push({
+        text: `${objectList} 데이터가 ${totalRows}건 있어요`,
+        icon: '📋',
+        category: 'object'
+      });
+    }
+
+    // 2. Analyze specific field values for context
+    // Check for source/channel data
+    const sourceCol = columns.find(c => c.includes('출처') || c.includes('채널') || c.toLowerCase().includes('source'));
+    if (sourceCol && totalRows > 0) {
+      const sources = sampleData.map(row => row[sourceCol]).filter(Boolean);
+      const uniqueSources = [...new Set(sources)];
+      if (uniqueSources.length > 0 && uniqueSources.length <= 5) {
+        const topSource = sources.reduce((acc: Record<string, number>, src) => {
+          const key = String(src);
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {});
+        const mostCommon = Object.entries(topSource).sort((a, b) => b[1] - a[1])[0];
+        if (mostCommon) {
+          insights.push({
+            text: `${mostCommon[0]}에서 유입된 데이터가 많네요`,
+            icon: '📊',
+            category: 'field'
+          });
+        }
+      }
+    }
+
+    // 3. Check for customer type/category
+    const categoryCol = columns.find(c => c.includes('구분') || c.includes('유형') || c.includes('분류'));
+    if (categoryCol && totalRows > 0) {
+      const categories = sampleData.map(row => row[categoryCol]).filter(Boolean);
+      const uniqueCategories = [...new Set(categories)];
+      if (uniqueCategories.length > 0 && uniqueCategories.length <= 10) {
+        const topCategory = categories.reduce((acc: Record<string, number>, cat) => {
+          const key = String(cat);
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {});
+        const mostCommon = Object.entries(topCategory).sort((a, b) => b[1] - a[1])[0];
+        if (mostCommon) {
+          insights.push({
+            text: `${mostCommon[0]} 고객이 ${mostCommon[1]}건으로 가장 많아요`,
+            icon: '🏢',
+            category: 'field'
+          });
+        }
+      }
+    }
+
+    // 4. Contact info insight
     const hasEmail = columns.some(c => c.includes('이메일') || c.toLowerCase().includes('email'));
     const hasPhone = columns.some(c => c.includes('전화') || c.toLowerCase().includes('phone'));
-    const hasAmount = columns.some(c => c.includes('금액') || c.includes('매출') || c.toLowerCase().includes('amount') || c.toLowerCase().includes('revenue'));
-    const hasStatus = columns.some(c => c.includes('상태') || c.includes('단계') || c.toLowerCase().includes('status') || c.toLowerCase().includes('stage'));
-
-    // Object-related insights
-    if (hasLead) {
-      insights.push({ text: '리드/잠재고객 데이터를 관리하고 계시네요', icon: '🎯', category: 'object' });
-    }
-    if (hasPeople || hasEmail || hasPhone) {
-      insights.push({ text: '고객 연락처 정보가 있어요', icon: '👤', category: 'object' });
-    }
-    if (hasOrg) {
-      insights.push({ text: '회사/조직 정보를 함께 관리하시네요', icon: '🏢', category: 'object' });
-    }
-    if (hasDeal || hasAmount) {
-      insights.push({ text: '영업 기회/딜 데이터도 있네요', icon: '💰', category: 'object' });
-    }
-
-    // Field-related insights
-    if (hasEmail && hasPhone) {
-      insights.push({ text: '이메일과 전화번호로 연락처를 관리해요', icon: '📧', category: 'field' });
-    }
-    if (hasStatus) {
-      insights.push({ text: '상태/단계별로 데이터를 추적하고 계시네요', icon: '📊', category: 'field' });
-    }
-
-    // Quality insights based on sample data
-    const totalRows = sampleData.length;
-    if (totalRows > 0) {
-      const emptyRatios = columns.map(col => {
-        const emptyCount = sampleData.filter(row => !row[col] || row[col] === '').length;
-        return emptyCount / totalRows;
+    if (hasEmail || hasPhone) {
+      const contactTypes = [hasEmail && '이메일', hasPhone && '전화번호'].filter(Boolean).join(', ');
+      insights.push({
+        text: `${contactTypes} 연락처 정보가 포함되어 있어요`,
+        icon: '📧',
+        category: 'field'
       });
-      const avgEmptyRatio = emptyRatios.reduce((a, b) => a + b, 0) / emptyRatios.length;
-      if (avgEmptyRatio < 0.2) {
-        insights.push({ text: '데이터 품질이 좋아요! 빈 값이 적네요', icon: '✅', category: 'quality' });
-      }
+    }
+
+    // 5. Date/timestamp insight
+    const dateCol = columns.find(c => c.includes('생성') || c.includes('날짜') || c.includes('타임스탬프'));
+    if (dateCol && totalRows > 0) {
+      insights.push({
+        text: `생성일/날짜 기록이 있어 히스토리 추적이 가능해요`,
+        icon: '📅',
+        category: 'field'
+      });
     }
 
     return insights.slice(0, 4); // Limit to 4 insights

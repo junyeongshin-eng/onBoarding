@@ -66,6 +66,22 @@ const FIELD_TYPE_FORMATS: Record<string, { format: string; example: string }> = 
   pipeline_stage: { format: '파이프라인 단계 이름', example: 'Qualification' },
 };
 
+// System fields that cannot be imported (auto-generated, read-only)
+const READ_ONLY_FIELD_PATTERNS = [
+  '수정 날짜', '수정일', 'updated_at', 'updated',
+  /^id$/i, /_id$/i,
+];
+
+const isReadOnlyColumn = (columnName: string): boolean => {
+  const normalized = columnName.toLowerCase();
+  // Check for exact id match or ending with _id
+  if (normalized === 'id' || normalized.endsWith('_id')) return true;
+  // Check for update date patterns
+  if (normalized.includes('수정 날짜') || normalized.includes('수정일') ||
+      normalized.includes('updated_at') || normalized.includes('updated at')) return true;
+  return false;
+};
+
 export function FieldMapper({
   objectTypes,
   sourceColumns,
@@ -397,23 +413,28 @@ export function FieldMapper({
       <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
         <div className="flex items-center gap-4 flex-wrap">
           {(() => {
-            const requiredCols = sourceColumns.filter(col => !columnsToSkip.includes(col));
-            const optionalCols = sourceColumns.filter(col => columnsToSkip.includes(col));
-            const mappedRequiredCols = requiredCols.filter(col => mappings.some(m => m.source_column === col));
-            const mappedOptionalCols = optionalCols.filter(col => mappings.some(m => m.source_column === col));
-            const allRequiredMapped = mappedRequiredCols.length === requiredCols.length;
+            // Importable columns: exclude skip-recommended and read-only
+            const importableCols = sourceColumns.filter(col =>
+              !columnsToSkip.includes(col) && !isReadOnlyColumn(col)
+            );
+            const skippedCols = sourceColumns.filter(col =>
+              columnsToSkip.includes(col) || isReadOnlyColumn(col)
+            );
+            const mappedImportableCols = importableCols.filter(col => mappings.some(m => m.source_column === col));
+            const mappedSkippedCols = skippedCols.filter(col => mappings.some(m => m.source_column === col));
+            const allImportableMapped = mappedImportableCols.length === importableCols.length;
 
             return (
               <>
-                <span className={`text-sm font-medium ${allRequiredMapped ? 'text-green-600' : 'text-red-600'}`}>
-                  필수 컬럼: {mappedRequiredCols.length} / {requiredCols.length}
-                  {!allRequiredMapped && (
-                    <span className="ml-1">({requiredCols.length - mappedRequiredCols.length}개 미매핑)</span>
+                <span className={`text-sm font-medium ${allImportableMapped ? 'text-green-600' : 'text-blue-600'}`}>
+                  이관 컬럼: {mappedImportableCols.length} / {importableCols.length}
+                  {!allImportableMapped && (
+                    <span className="ml-1">({importableCols.length - mappedImportableCols.length}개 미매핑)</span>
                   )}
                 </span>
-                {optionalCols.length > 0 && (
+                {skippedCols.length > 0 && (
                   <span className="text-sm text-slate-500">
-                    선택 컬럼: {mappedOptionalCols.length} / {optionalCols.length}
+                    건너뜀: {skippedCols.length - mappedSkippedCols.length}개
                   </span>
                 )}
               </>
@@ -517,18 +538,26 @@ export function FieldMapper({
         {sourceColumns.map((col) => {
           const confidence = aiConfidence[col];
           const isMapped = mappings.some(m => m.source_column === col);
-          const isOptional = columnsToSkip.includes(col);
+          const isSkipRecommended = columnsToSkip.includes(col);
+          const isReadOnly = isReadOnlyColumn(col);
+          // Read-only fields (id, 수정날짜) are optional, everything else we want to import
+          const isOptional = isSkipRecommended || isReadOnly;
 
           // Determine border/background color
           let borderClass = 'border-slate-200';
           let bgClass = 'bg-white';
           if (!isMapped) {
-            if (isOptional) {
+            if (isReadOnly) {
+              // Read-only fields: gray (skip recommended)
+              borderClass = 'border-slate-300';
+              bgClass = 'bg-slate-50';
+            } else if (isSkipRecommended) {
               borderClass = 'border-amber-300';
               bgClass = 'bg-amber-50';
             } else {
-              borderClass = 'border-red-400';
-              bgClass = 'bg-red-50';
+              // Regular unmapped fields: light blue to indicate "should map"
+              borderClass = 'border-blue-300';
+              bgClass = 'bg-blue-50';
             }
           }
 
@@ -536,11 +565,14 @@ export function FieldMapper({
             <div key={col} className={`flex items-center gap-4 p-3 border rounded-lg ${borderClass} ${bgClass}`}>
               <div className="flex-1 min-w-0 flex items-center gap-2">
                 <span className="font-medium text-slate-700 truncate block">{col}</span>
-                {isOptional && (
+                {isReadOnly && (
+                  <span className="px-1.5 py-0.5 bg-slate-200 text-slate-600 text-xs rounded">수정불가</span>
+                )}
+                {!isReadOnly && isSkipRecommended && (
                   <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-xs rounded">선택</span>
                 )}
                 {!isMapped && !isOptional && (
-                  <span className="px-1.5 py-0.5 bg-red-100 text-red-600 text-xs rounded">필수</span>
+                  <span className="px-1.5 py-0.5 bg-blue-100 text-blue-600 text-xs rounded">이관</span>
                 )}
               </div>
               <div className="flex items-center text-slate-400 flex-shrink-0">
@@ -553,10 +585,10 @@ export function FieldMapper({
                   value={getMappedField(col)}
                   onChange={(e) => handleMappingChange(col, e.target.value)}
                   className={`flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm ${
-                    isMapped ? 'border-slate-300' : (isOptional ? 'border-amber-300' : 'border-red-400')
+                    isMapped ? 'border-slate-300' : (isReadOnly ? 'border-slate-300' : isSkipRecommended ? 'border-amber-300' : 'border-blue-300')
                   }`}
                 >
-                  <option value="">{isOptional ? '-- 건너뛰기 (선택) --' : '-- 필드 선택 (필수) --'}</option>
+                  <option value="">{isReadOnly ? '-- 건너뛰기 (수정 불가) --' : isSkipRecommended ? '-- 건너뛰기 (선택) --' : '-- 필드 선택 --'}</option>
                   {objectTypes.map((objType) => (
                     <optgroup key={objType} label={OBJECT_NAMES[objType]}>
                       {fieldsByObject[objType]?.map((field) => {
@@ -684,29 +716,32 @@ export function FieldMapper({
         </div>
       )}
 
-      {/* Unmapped required columns warning */}
+      {/* Unmapped columns info */}
       {(() => {
-        const requiredCols = sourceColumns.filter(col => !columnsToSkip.includes(col));
-        const unmappedRequired = requiredCols.filter(col => !mappings.some(m => m.source_column === col));
+        // Exclude read-only columns (id, 수정 날짜) and skip-recommended columns
+        const importableCols = sourceColumns.filter(col =>
+          !columnsToSkip.includes(col) && !isReadOnlyColumn(col)
+        );
+        const unmappedCols = importableCols.filter(col => !mappings.some(m => m.source_column === col));
 
-        if (unmappedRequired.length === 0) return null;
+        if (unmappedCols.length === 0) return null;
 
         return (
-          <div className="p-4 bg-red-50 border border-red-300 rounded-lg">
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="flex items-start gap-2">
-              <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              <svg className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <div>
-                <p className="font-medium text-red-800">
-                  필수 컬럼을 매핑해야 합니다 ({unmappedRequired.length}개 미매핑)
+                <p className="font-medium text-blue-800">
+                  이관할 컬럼을 매핑해주세요 ({unmappedCols.length}개 미매핑)
                 </p>
-                <p className="text-sm text-red-700 mt-1">
-                  데이터 누락을 방지하기 위해 필수 컬럼을 매핑해주세요.
+                <p className="text-sm text-blue-700 mt-1">
+                  데이터를 세일즈맵으로 이관하려면 필드를 매핑해주세요.
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1">
-                  {unmappedRequired.map(col => (
-                    <span key={col} className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded">
+                  {unmappedCols.map(col => (
+                    <span key={col} className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded">
                       {col}
                     </span>
                   ))}
@@ -717,13 +752,18 @@ export function FieldMapper({
         );
       })()}
 
-      {/* All required columns mapped success message */}
+      {/* All importable columns mapped success message */}
       {(() => {
-        const requiredCols = sourceColumns.filter(col => !columnsToSkip.includes(col));
-        const allRequiredMapped = requiredCols.every(col => mappings.some(m => m.source_column === col));
-        const skippedCount = columnsToSkip.filter(col => !mappings.some(m => m.source_column === col)).length;
+        const importableCols = sourceColumns.filter(col =>
+          !columnsToSkip.includes(col) && !isReadOnlyColumn(col)
+        );
+        const allMapped = importableCols.every(col => mappings.some(m => m.source_column === col));
+        const skippedCount = sourceColumns.filter(col =>
+          (columnsToSkip.includes(col) || isReadOnlyColumn(col)) &&
+          !mappings.some(m => m.source_column === col)
+        ).length;
 
-        if (!allRequiredMapped || requiredCols.length === 0) return null;
+        if (!allMapped || importableCols.length === 0) return null;
 
         return (
           <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
@@ -731,10 +771,10 @@ export function FieldMapper({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
             <span className="text-green-700 font-medium">
-              필수 컬럼이 모두 매핑되었습니다 ({requiredCols.length}개)
+              이관할 컬럼이 모두 매핑되었습니다 ({importableCols.length}개)
               {skippedCount > 0 && (
                 <span className="text-slate-500 font-normal ml-2">
-                  (선택 컬럼 {skippedCount}개 건너뜀)
+                  (건너뛴 컬럼 {skippedCount}개)
                 </span>
               )}
             </span>
