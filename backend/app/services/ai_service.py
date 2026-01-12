@@ -426,7 +426,7 @@ async def consulting_chat(
 - 딜(Deal): 진행 중인 거래, 계약
 
 ## 주요 질문 포인트
-1. 어떤 사업을 하시나요? (B2B/B2C, 업종)
+1. 어떤 사업을 하시나요? (B2B, 업종)
 2. 현재 어떤 데이터를 관리하고 계신가요?
 3. 어떤 목적으로 데이터를 임포트하시나요?
 4. 기존에 CRM을 사용하셨나요?
@@ -480,20 +480,113 @@ async def consulting_chat(
 
 ### 세일즈맵 데이터 이관 필수 규칙 (반드시 준수!)
 
-#### 1. 오브젝트별 필수 필드
-- People (고객): "이름" 필드 필수
-- Organization (회사): "이름" 필드 필수
-- Lead (리드): "이름" 필드 필수 + 반드시 "연결된 고객 이름" 또는 "연결된 회사 이름" 중 하나 이상 필요
-- Deal (딜): "이름" 필드 필수 + 반드시 "연결된 고객 이름" 또는 "연결된 회사 이름" 중 하나 이상 필요
+#### 1. 오브젝트별 필수 조건 및 유니크 값
+- People (고객): 이름 필수, 이메일이 유니크 값 (중복 불가)
+- Organization (회사): 이름 필수, 이름이 유니크 값 (중복 불가)
+- Lead (리드): 이름 필수, 고객 또는 회사와 반드시 1개 이상 연결 필수
+- Deal (딜): 이름 필수, 고객 또는 회사와 반드시 1개 이상 연결 필수, 파이프라인 및 파이프라인 단계 필수
 
-#### 2. 딜/리드의 연결 관계 (매우 중요!)
+#### 2. 리드 vs 딜 사용 가이드 (중요!)
+- 리드(Lead): 마케팅 단계에서 사용 - 잠재 고객 발굴, 초기 문의, 마케팅 캠페인 응답 등
+- 딜(Deal): 영업팀 단계에서 사용 - 본격적인 영업 진행, 견적/계약, 수주 관리 등
+- 마케팅에서 영업으로 넘어갈 때 리드 → 딜로 전환
+
+#### 3. 딜/리드의 연결 관계 (매우 중요!)
 - 딜 또는 리드를 가져올 때 고객(People) 또는 회사(Organization)와 연결이 필수입니다
 - 연결 방법: 파일에 고객 이름이나 회사 이름 컬럼이 있어야 합니다
 - 딜/리드를 추천할 때는 반드시 people 또는 company도 함께 추천해야 합니다
 
-#### 3. 필드 이름 규칙
-- 각 필드는 "오브젝트명 - 필드명" 형식으로 매핑됩니다
-- 예: "People - 이름", "Organization - 이름", "Deal - 파이프라인", "Lead - 상태"
+### 세일즈맵 시스템 필드 (수정 가능) - 최대한 시스템 필드 활용!
+
+#### People (고객) 시스템 필드
+- 이름 (text) - 필수
+- 이메일 (email) - 유니크 값
+- 전화 (phone)
+- 팀 (users) - 사용자 복수
+- 총 매출 (number)
+- 수신 거부 여부 (boolean)
+- 수신 거부 사유 (text)
+- 소스 (select)
+- 생성 날짜 (datetime)
+- 담당자 (user)
+- 고객 여정 단계 (select)
+
+#### Organization (회사) 시스템 필드
+- 이름 (text) - 필수, 유니크 값
+- 전화 (phone)
+- 웹 주소 (url)
+- 팀 (users)
+- 총 매출 (number)
+- 업종 (select)
+- 직원수 (number)
+- 주소 (text)
+- 생성 날짜 (datetime)
+- 매출(억) (number)
+- 담당자 (user)
+
+#### Deal (딜) 시스템 필드
+- 이름 (text) - 필수
+- 파이프라인 (select) - 필수
+- 파이프라인 단계 (select) - 필수
+- 연결된 고객 이름 / 연결된 회사 이름 - 둘 중 하나 필수
+- 금액 (number)
+- 상태 (select)
+- 팀 (users)
+- 담당자 (user)
+- 팔로워 (users)
+- 수주 예정일 (datetime)
+- 마감일 (datetime)
+- 생성 날짜 (datetime)
+- 월 구독 금액 (number)
+- 실패 사유 (text)
+- 실패 상세 사유 (text)
+- 구독 시작일 (datetime)
+- 구독 종료일 (datetime)
+- 구독 시작 유형 (select)
+- 구독 종료 유형 (select)
+
+#### Lead (리드) 시스템 필드
+- 이름 (text) - 필수
+- 파이프라인 (select)
+- 파이프라인 단계 (select)
+- 연결된 고객 이름 / 연결된 회사 이름 - 둘 중 하나 필수
+- 금액 (number)
+- 상태 (select)
+- 팀 (users)
+- 담당자 (user)
+- 팔로워 (users)
+- 수주 예정일 (datetime)
+- 마감일 (datetime)
+- 생성 날짜 (datetime)
+- 보류 사유 (text)
+- 보류 상세 사유 (text)
+
+### 필드 유형 (field_type) 종류
+- text: 일반 텍스트
+- number: 숫자 (금액, 수량 등)
+- email: 이메일 주소 (텍스트*이메일)
+- phone: 전화번호 (텍스트*전화)
+- url: URL 주소
+- date: 날짜 (YYYY-MM-DD)
+- datetime: 날짜+시간
+- select: 단일 선택
+- multiselect: 복수 선택
+- boolean: True/False (T/F)
+- user: 사용자 (단일) - 담당자 등
+- users: 사용자 (복수) - 팔로워, 팀 등
+- file: 파일 첨부
+
+### 필드 유형 매칭 규칙
+- 이메일 형식 → email (시스템 필드 우선)
+- 전화번호 형식 → phone (시스템 필드 우선)
+- True/False, 예/아니오, O/X → boolean
+- 날짜만 → date, 날짜+시간 → datetime
+- 숫자/금액 → number
+- 제한된 옵션 (10개 이하) → select
+- 쉼표로 구분된 복수 값 → multiselect
+- 담당자/영업사원 → user
+- 팀/팔로워 → users
+- 그 외 → text
 
 ### 컬럼 분석 원칙 (매우 중요!)
 
@@ -501,6 +594,11 @@ async def consulting_chat(
 - 각 컬럼은 columns_to_keep 또는 columns_to_skip 중 하나에만 포함되어야 합니다
 - 절대로 같은 컬럼이 두 리스트에 동시에 나타나면 안됩니다
 - columns_to_keep + columns_to_skip = 전체 컬럼 수가 되어야 합니다
+
+#### 시스템 필드 우선 매칭 (중요!)
+- 가능하면 시스템 필드에 먼저 매핑하세요
+- 시스템 필드에 없는 데이터만 커스텀 필드로 추천하세요
+- target_field에 시스템 필드 이름을 정확히 매칭하세요
 
 #### 유지 대상 컬럼 (columns_to_keep - 적극적으로 유지):
 - 고객/회사 정보 (이름, 연락처, 이메일, 주소 등)
@@ -515,27 +613,17 @@ async def consulting_chat(
 - 중복 컬럼 (동일한 데이터가 다른 이름으로 존재)
 - 임시/테스트 데이터 컬럼
 
-### 필드 유형 추천 규칙
-- 값이 제한된 경우 (10개 이하의 반복되는 값) → select (단일 선택)
-- 쉼표로 구분된 복수 값이 있는 경우 → multiselect (복수 선택)
-- 숫자만 있는 경우 → number
-- 날짜 형식인 경우 → date 또는 datetime
-- 이메일 형식 → email
-- 전화번호 형식 → phone
-- True/False, 예/아니오 등 → boolean
-- 그 외 → text
-
 {
   "summary": "사용자 비즈니스 요약 (1-2문장)",
   "recommended_objects": ["people", "deal"],
   "recommended_fields": [
     {
       "object_type": "people",
-      "field_id": "customer_group",
-      "field_label": "고객 그룹",
+      "field_id": "source",
+      "field_label": "소스",
       "field_type": "select",
-      "field_type_reason": "5개의 고정된 그룹 값만 존재",
-      "reason": "추천 이유"
+      "field_type_reason": "5개의 고정된 소스 값만 존재하여 단일 선택 필드 적합",
+      "reason": "고객 유입 경로 관리를 위한 시스템 필드"
     }
   ],
   "column_analysis": {
@@ -545,8 +633,15 @@ async def consulting_chat(
         "column_name": "고객명",
         "recommended_type": "text",
         "target_object": "people",
-        "target_field": "name",
-        "reason": "고객 이름 - 필수 정보"
+        "target_field": "이름",
+        "reason": "고객 이름 - 필수 시스템 필드"
+      },
+      {
+        "column_name": "이메일주소",
+        "recommended_type": "email",
+        "target_object": "people",
+        "target_field": "이메일",
+        "reason": "이메일 - 유니크 시스템 필드"
       }
     ],
     "columns_to_skip": [
@@ -562,7 +657,10 @@ async def consulting_chat(
 ### 검증 체크리스트 (JSON 출력 전 확인)
 1. columns_to_keep과 columns_to_skip에 중복된 컬럼이 없는가?
 2. 딜/리드를 추천하면 people 또는 company도 함께 추천했는가?
-3. 딜/리드 추천 시 연결용 필드(연결된 고객 이름 또는 연결된 회사 이름)가 recommended_fields에 있는가?
+3. 딜 추천 시 파이프라인/파이프라인 단계 필드도 추천했는가?
+4. 딜/리드 추천 시 연결용 필드(연결된 고객 이름 또는 연결된 회사 이름)가 recommended_fields에 있는가?
+5. 시스템 필드에 매핑 가능한 컬럼은 시스템 필드로 매핑했는가?
+6. field_type이 올바른 유형인가? (text, number, email, phone, date, datetime, select, multiselect, boolean, user, users, file, url)
 
 JSON만 응답하세요."""
 
