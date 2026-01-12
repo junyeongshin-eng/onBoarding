@@ -65,12 +65,31 @@ export function Onboarding() {
   ): MissingFieldInfo[] => {
     const missing: MissingFieldInfo[] = [];
 
+    // Helper to extract core field name from labels like "고객 - 이메일" -> "이메일"
+    const extractCoreName = (label: string): string => {
+      const parts = label.split(' - ');
+      return parts.length > 1 ? parts[parts.length - 1].trim() : label.trim();
+    };
+
     // Check recommended fields from consulting
     for (const field of recommendedFields) {
       if (!objectTypes.includes(field.objectType)) continue;
 
       const availableFields = salesmapFieldsMap[field.objectType] || [];
-      const exists = availableFields.some(f => f.id === field.fieldId || f.label === field.fieldLabel);
+      const coreFieldLabel = extractCoreName(field.fieldLabel);
+
+      // Check if field exists by:
+      // 1. Exact ID match
+      // 2. Exact label match
+      // 3. Core label match (e.g., "이메일" matches "고객 - 이메일")
+      // 4. Label contains core name
+      const exists = availableFields.some(f =>
+        f.id === field.fieldId ||
+        f.label === field.fieldLabel ||
+        f.label === coreFieldLabel ||
+        f.id === coreFieldLabel.toLowerCase() ||
+        field.fieldLabel.includes(f.label)
+      );
 
       if (!exists) {
         missing.push({
