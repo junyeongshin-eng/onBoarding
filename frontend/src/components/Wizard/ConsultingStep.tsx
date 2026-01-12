@@ -13,9 +13,10 @@ interface DisplayMessage {
   content: string;
 }
 
-interface SuggestedQuestion {
+interface SuggestedInsight {
   text: string;
-  category: string;
+  icon: string;
+  category: 'object' | 'field' | 'quality';
 }
 
 export default function ConsultingStep({ onComplete, existingResult }: ConsultingStepProps) {
@@ -28,7 +29,7 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisComplete, setAnalysisComplete] = useState(false);
-  const [suggestedQuestions, setSuggestedQuestions] = useState<SuggestedQuestion[]>([]);
+  const [suggestedInsights, setSuggestedInsights] = useState<SuggestedInsight[]>([]);
 
   // Chat state
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -79,9 +80,9 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
     };
   }, [uploadedFile, fileData]);
 
-  // Generate suggested questions based on file analysis
-  const generateSuggestedQuestions = useCallback((columns: string[], sampleData: Record<string, unknown>[]) => {
-    const questions: SuggestedQuestion[] = [];
+  // Generate suggested insights based on file analysis
+  const generateSuggestedInsights = useCallback((columns: string[], sampleData: Record<string, unknown>[]) => {
+    const insights: SuggestedInsight[] = [];
 
     // Check for common column patterns
     const hasLead = columns.some(c => c.includes('리드') || c.toLowerCase().includes('lead'));
@@ -90,32 +91,45 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
     const hasDeal = columns.some(c => c.includes('딜') || c.includes('거래') || c.toLowerCase().includes('deal'));
     const hasEmail = columns.some(c => c.includes('이메일') || c.toLowerCase().includes('email'));
     const hasPhone = columns.some(c => c.includes('전화') || c.toLowerCase().includes('phone'));
-    const hasDate = columns.some(c => c.includes('날짜') || c.includes('생성') || c.toLowerCase().includes('date'));
+    const hasAmount = columns.some(c => c.includes('금액') || c.includes('매출') || c.toLowerCase().includes('amount') || c.toLowerCase().includes('revenue'));
+    const hasStatus = columns.some(c => c.includes('상태') || c.includes('단계') || c.toLowerCase().includes('status') || c.toLowerCase().includes('stage'));
 
-    // Business context questions
+    // Object-related insights
     if (hasLead) {
-      questions.push({ text: '이 리드 데이터는 어떤 마케팅 채널에서 수집되었나요?', category: '비즈니스' });
+      insights.push({ text: '리드/잠재고객 데이터를 관리하고 계시네요', icon: '🎯', category: 'object' });
     }
-    if (hasOrg && hasPeople) {
-      questions.push({ text: '고객과 회사는 어떤 관계로 연결되나요?', category: '데이터 구조' });
+    if (hasPeople || hasEmail || hasPhone) {
+      insights.push({ text: '고객 연락처 정보가 있어요', icon: '👤', category: 'object' });
     }
-    if (hasDeal) {
-      questions.push({ text: '딜/거래의 영업 프로세스는 어떻게 되나요?', category: '비즈니스' });
+    if (hasOrg) {
+      insights.push({ text: '회사/조직 정보를 함께 관리하시네요', icon: '🏢', category: 'object' });
+    }
+    if (hasDeal || hasAmount) {
+      insights.push({ text: '영업 기회/딜 데이터도 있네요', icon: '💰', category: 'object' });
     }
 
-    // Data quality questions
+    // Field-related insights
     if (hasEmail && hasPhone) {
-      questions.push({ text: '이메일과 전화번호 중 주요 연락 수단은 무엇인가요?', category: '데이터 활용' });
+      insights.push({ text: '이메일과 전화번호로 연락처를 관리해요', icon: '📧', category: 'field' });
     }
-    if (hasDate) {
-      questions.push({ text: '날짜 데이터는 어떤 용도로 활용하시나요?', category: '데이터 활용' });
+    if (hasStatus) {
+      insights.push({ text: '상태/단계별로 데이터를 추적하고 계시네요', icon: '📊', category: 'field' });
     }
 
-    // General questions
-    questions.push({ text: '이 데이터로 가장 먼저 하고 싶은 작업은 무엇인가요?', category: '목표' });
-    questions.push({ text: '현재 영업 팀에서 가장 중요하게 보는 지표가 있나요?', category: '비즈니스' });
+    // Quality insights based on sample data
+    const totalRows = sampleData.length;
+    if (totalRows > 0) {
+      const emptyRatios = columns.map(col => {
+        const emptyCount = sampleData.filter(row => !row[col] || row[col] === '').length;
+        return emptyCount / totalRows;
+      });
+      const avgEmptyRatio = emptyRatios.reduce((a, b) => a + b, 0) / emptyRatios.length;
+      if (avgEmptyRatio < 0.2) {
+        insights.push({ text: '데이터 품질이 좋아요! 빈 값이 적네요', icon: '✅', category: 'quality' });
+      }
+    }
 
-    return questions.slice(0, 4); // Limit to 4 questions
+    return insights.slice(0, 4); // Limit to 4 insights
   }, []);
 
   // Analyze file and generate initial analysis
@@ -129,9 +143,9 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
       total_rows: file.total_rows,
     };
 
-    // Generate suggested questions
-    const questions = generateSuggestedQuestions(file.columns, data);
-    setSuggestedQuestions(questions);
+    // Generate suggested insights
+    const insights = generateSuggestedInsights(file.columns, data);
+    setSuggestedInsights(insights);
 
     // Create initial analysis message
     const analysisPrompt = `파일이 업로드되었습니다. 데이터를 분석해서 어떤 CRM 오브젝트(리드, 고객, 회사, 딜)에 적합한지, 주요 컬럼은 무엇인지 간단히 분석해주세요. 그리고 데이터를 더 잘 이해하기 위해 사용자에게 물어볼 질문 1-2개를 제안해주세요.`;
@@ -152,13 +166,13 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
         ]);
       } else {
         // Fallback message
-        const fallbackMsg = `📊 **${file.filename}** 업로드 완료!\n\n**컬럼 ${file.columns.length}개 발견:**\n${file.columns.slice(0, 8).join(', ')}${file.columns.length > 8 ? ` 외 ${file.columns.length - 8}개` : ''}\n\n아래 추천 질문을 선택하거나 직접 질문해주세요.`;
+        const fallbackMsg = `📊 **${file.filename}** 업로드 완료!\n\n**컬럼 ${file.columns.length}개 발견:**\n${file.columns.slice(0, 8).join(', ')}${file.columns.length > 8 ? ` 외 ${file.columns.length - 8}개` : ''}\n\n아래에서 맞는 항목을 선택해주세요.`;
         setMessages([{ id: 'analysis', type: 'bot', content: fallbackMsg }]);
         setApiMessages([{ role: 'assistant', content: fallbackMsg }]);
       }
     } catch (error) {
       console.error('Analysis error:', error);
-      const fallbackMsg = `📊 **${file.filename}** 업로드 완료!\n\n데이터에 ${file.columns.length}개의 컬럼이 있습니다.\n아래 추천 질문을 선택하거나 직접 질문해주세요.`;
+      const fallbackMsg = `📊 **${file.filename}** 업로드 완료!\n\n데이터에 ${file.columns.length}개의 컬럼이 있습니다.\n아래에서 맞는 항목을 선택해주세요.`;
       setMessages([{ id: 'analysis', type: 'bot', content: fallbackMsg }]);
       setApiMessages([{ role: 'assistant', content: fallbackMsg }]);
     } finally {
@@ -166,7 +180,7 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
       setAnalysisComplete(true);
       setChatStarted(true);
     }
-  }, [generateSuggestedQuestions]);
+  }, [generateSuggestedInsights]);
 
   // Handle file upload
   const handleFile = useCallback(async (file: File) => {
@@ -204,38 +218,37 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
     setMessages([{ id: 'welcome', type: 'bot', content: welcomeMsg }]);
     setApiMessages([{ role: 'assistant', content: welcomeMsg }]);
     setChatStarted(true);
-    setSuggestedQuestions([
-      { text: '리드/잠재고객 데이터를 관리하고 있어요', category: '데이터 유형' },
-      { text: '고객과 회사 정보를 가져오고 싶어요', category: '데이터 유형' },
-      { text: '영업 기회/딜 데이터가 있어요', category: '데이터 유형' },
-      { text: '여러 종류의 데이터가 섞여있어요', category: '데이터 유형' },
+    setSuggestedInsights([
+      { text: '리드/잠재고객 데이터를 관리하고 있어요', icon: '🎯', category: 'object' },
+      { text: '고객과 회사 정보를 가져오고 싶어요', icon: '👥', category: 'object' },
+      { text: '영업 기회/딜 데이터가 있어요', icon: '💰', category: 'object' },
+      { text: '여러 종류의 데이터가 섞여있어요', icon: '📁', category: 'object' },
     ]);
   }, []);
 
-  // Handle suggested question click
-  const handleSuggestedQuestion = useCallback((question: string) => {
-    setInputValue(question);
-    // Auto-send after a brief delay
-    setTimeout(() => {
-      const userMsgId = `user-${Date.now()}`;
-      setMessages(prev => [...prev, { id: userMsgId, type: 'user', content: question }]);
+  // Handle suggested insight click - confirm the insight and continue conversation
+  const handleSuggestedInsight = useCallback((insightText: string) => {
+    // Clear insights after selection
+    setSuggestedInsights([]);
 
-      const newApiMessages: ChatMessage[] = [...apiMessages, { role: 'user', content: question }];
-      setApiMessages(newApiMessages);
-      setInputValue('');
+    const userMsgId = `user-${Date.now()}`;
+    const confirmMessage = `네, 맞아요. ${insightText}`;
+    setMessages(prev => [...prev, { id: userMsgId, type: 'user', content: confirmMessage }]);
 
-      // Send to API
-      setIsLoading(true);
-      consultingChat(newApiMessages, false, getFileContext())
-        .then(response => {
-          if (response.type === 'message' && response.content) {
-            setMessages(prev => [...prev, { id: `bot-${Date.now()}`, type: 'bot', content: response.content! }]);
-            setApiMessages(prev => [...prev, { role: 'assistant', content: response.content! }]);
-          }
-        })
-        .catch(console.error)
-        .finally(() => setIsLoading(false));
-    }, 100);
+    const newApiMessages: ChatMessage[] = [...apiMessages, { role: 'user', content: confirmMessage }];
+    setApiMessages(newApiMessages);
+
+    // Send to API for follow-up
+    setIsLoading(true);
+    consultingChat(newApiMessages, false, getFileContext())
+      .then(response => {
+        if (response.type === 'message' && response.content) {
+          setMessages(prev => [...prev, { id: `bot-${Date.now()}`, type: 'bot', content: response.content! }]);
+          setApiMessages(prev => [...prev, { role: 'assistant', content: response.content! }]);
+        }
+      })
+      .catch(console.error)
+      .finally(() => setIsLoading(false));
   }, [apiMessages, getFileContext]);
 
   // Auto-scroll to bottom
@@ -569,19 +582,20 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
         </div>
       )}
 
-      {/* Suggested questions */}
-      {chatStarted && suggestedQuestions.length > 0 && messages.length < 4 && (
-        <div className="bg-slate-50 rounded-xl p-4">
-          <p className="text-sm text-slate-600 mb-3">💡 추천 질문을 선택하세요:</p>
+      {/* Suggested insights */}
+      {chatStarted && suggestedInsights.length > 0 && (
+        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+          <p className="text-sm text-blue-700 font-medium mb-3">🔍 이런 데이터가 있는 것 같아요. 맞으면 선택해주세요:</p>
           <div className="flex flex-wrap gap-2">
-            {suggestedQuestions.map((q, idx) => (
+            {suggestedInsights.map((insight, idx) => (
               <button
                 key={idx}
-                onClick={() => handleSuggestedQuestion(q.text)}
+                onClick={() => handleSuggestedInsight(insight.text)}
                 disabled={isLoading}
-                className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors disabled:opacity-50"
+                className="px-4 py-2.5 bg-white border border-blue-200 rounded-lg text-sm text-slate-700 hover:bg-blue-100 hover:border-blue-400 hover:text-blue-800 transition-colors disabled:opacity-50 flex items-center gap-2"
               >
-                {q.text}
+                <span>{insight.icon}</span>
+                <span>{insight.text}</span>
               </button>
             ))}
           </div>
