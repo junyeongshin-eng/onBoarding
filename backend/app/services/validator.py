@@ -8,11 +8,12 @@ from pydantic import ValidationError
 from app.models.schemas import (
     TriageResult, MappingResult, ColumnKeep, ColumnSkip,
     FieldMapping, ValidationResult, ValidationErrorItem, ValidationSeverity,
-    ObjectType
+    ObjectType, SkipReason
 )
 from app.models.salesmap import (
     REQUIRED_FIELDS, UNIQUE_FIELDS, CONNECTION_REQUIREMENTS,
-    MIN_KEEP_RATIO, MAX_SKIP_COLUMNS, get_object_name
+    MIN_KEEP_RATIO, MAX_SKIP_COLUMNS, get_object_name, get_object_english_name,
+    OBJECT_ENGLISH_NAMES
 )
 
 
@@ -73,55 +74,83 @@ class TriageValidator:
                 suggestion="각 컬럼은 keep 또는 skip 중 하나에만 있어야 합니다",
             ))
 
-        # 3. 전체 컬럼 누락 검증
+        # 3. 전체 컬럼 누락 검증 - 누락된 컬럼은 자동으로 skip에 추가
         all_classified = keep_names | skip_names
         missing = set(all_columns) - all_classified
         if missing:
-            errors.append(ValidationErrorItem(
+            # 누락된 컬럼을 자동으로 skip에 추가 (auto-fix)
+            for col_name in missing:
+                result.columns_to_skip.append(ColumnSkip(
+                    column_name=col_name,
+                    reason=SkipReason.AUTO_SKIPPED,
+                    detail="LLM이 분류하지 않아 자동으로 제외됨",
+                ))
+            # 경고로 처리 (에러가 아님)
+            warnings.append(ValidationErrorItem(
                 field="columns",
-                message=f"분류되지 않은 컬럼: {missing}",
-                severity=ValidationSeverity.ERROR,
-                suggestion="모든 컬럼은 keep 또는 skip으로 분류되어야 합니다",
+                message=f"자동 제외된 컬럼 ({len(missing)}개): {missing}",
+                severity=ValidationSeverity.WARNING,
+                suggestion="LLM이 분류하지 않아 자동으로 제외되었습니다",
             ))
+            # skip_names 업데이트
+            skip_names.update(missing)
 
         extra = all_classified - set(all_columns)
         if extra:
-            errors.append(ValidationErrorItem(
+            # 원본에 없는 컬럼은 제거 (auto-fix)
+            result.columns_to_keep = [c for c in result.columns_to_keep if c.column_name in set(all_columns)]
+            result.columns_to_skip = [c for c in result.columns_to_skip if c.column_name in set(all_columns)]
+            warnings.append(ValidationErrorItem(
                 field="columns",
-                message=f"원본에 없는 컬럼: {extra}",
-                severity=ValidationSeverity.ERROR,
+                message=f"원본에 없어 제거된 컬럼: {extra}",
+                severity=ValidationSeverity.WARNING,
             ))
 
-        # 4. 유지 비율 검증 (90% 이상)
+        # 4. 유지 비율 검증 (90% 이상) - ERROR로 처리하여 repair loop 유도
         total = len(all_columns)
         keep_count = len(result.columns_to_keep)
         keep_ratio = keep_count / total if total > 0 else 0
 
         if keep_ratio < MIN_KEEP_RATIO:
-            warnings.append(ValidationErrorItem(
+            errors.append(ValidationErrorItem(
                 field="columns_to_keep",
-                message=f"유지 비율이 {keep_ratio:.1%}로 권장 {MIN_KEEP_RATIO:.0%} 미만입니다",
-                severity=ValidationSeverity.WARNING,
-                suggestion=f"{total}개 컬럼 중 {int(total * MIN_KEEP_RATIO)}개 이상 유지를 권장합니다",
+                message=f"유지 비율이 {keep_ratio:.1%}로 필수 {MIN_KEEP_RATIO:.0%} 미만입니다",
+                severity=ValidationSeverity.ERROR,
+                suggestion=f"{total}개 컬럼 중 {int(total * MIN_KEEP_RATIO)}개 이상 유지 필수. 빈 값이 있어도 100% 비어있지 않으면 유지하세요.",
             ))
 
-        # 5. 제외 컬럼 수 검증
+        # 5. 제외 컬럼 수 검증 - ERROR로 처리하여 repair loop 유도
         if len(result.columns_to_skip) > MAX_SKIP_COLUMNS:
-            warnings.append(ValidationErrorItem(
+            errors.append(ValidationErrorItem(
                 field="columns_to_skip",
-                message=f"제외 컬럼이 {len(result.columns_to_skip)}개로 권장 {MAX_SKIP_COLUMNS}개 초과",
-                severity=ValidationSeverity.WARNING,
+                message=f"제외 컬럼이 {len(result.columns_to_skip)}개로 최대 {MAX_SKIP_COLUMNS}개 초과",
+                severity=ValidationSeverity.ERROR,
+                suggestion="시스템 ID나 100% 빈 컬럼만 제외하세요. 빈 값이 일부만 있는 컬럼은 유지 필수.",
             ))
 
-        # 6. 필드 라벨 형식 검증
+        # 6. 필드 라벨 형식 검증 (영어 오브젝트명 허용: Lead, People, Organization, Deal)
+        valid_prefixes = set(OBJECT_ENGLISH_NAMES.values())  # Lead, People, Organization, Deal
         for col in result.columns_to_keep:
             if ' - ' not in col.suggested_field_label:
                 errors.append(ValidationErrorItem(
                     field=f"columns_to_keep.{col.column_name}.suggested_field_label",
                     message=f"'{col.suggested_field_label}' 형식 오류: '오브젝트 - 필드명' 형식 필요",
                     severity=ValidationSeverity.ERROR,
-                    suggestion=f"'{get_object_name(col.target_object)} - 필드명' 형식으로 수정",
+                    suggestion=f"'{get_object_english_name(col.target_object)} - 필드명' 형식으로 수정 (Lead, People, Organization, Deal)",
                 ))
+            else:
+                # 영어 오브젝트명 접두사 검증
+                prefix = col.suggested_field_label.split(' - ')[0]
+                if prefix not in valid_prefixes:
+                    # 한글 접두사도 허용 (하위 호환)
+                    korean_prefixes = {'고객', '회사', '조직', '딜', '리드'}
+                    if prefix not in korean_prefixes:
+                        errors.append(ValidationErrorItem(
+                            field=f"columns_to_keep.{col.column_name}.suggested_field_label",
+                            message=f"'{prefix}' 오브젝트명 오류: Lead, People, Organization, Deal 중 하나 사용",
+                            severity=ValidationSeverity.ERROR,
+                            suggestion=f"'{get_object_english_name(col.target_object)} - 필드명' 형식으로 수정",
+                        ))
 
         # 7. 추천 오브젝트 검증
         if not result.recommended_objects:
@@ -222,15 +251,26 @@ class MappingValidator:
                     suggestion=f"사용 가능: {valid_objects}",
                 ))
 
-        # 4. 필드 라벨 형식 검증
+        # 4. 필드 라벨 형식 검증 (영어 오브젝트명 허용)
+        valid_prefixes = set(OBJECT_ENGLISH_NAMES.values())  # Lead, People, Organization, Deal
+        korean_prefixes = {'고객', '회사', '조직', '딜', '리드'}
         for mapping in result.mappings:
             if ' - ' not in mapping.target_field_label:
                 errors.append(ValidationErrorItem(
                     field=f"mappings.{mapping.source_column}.target_field_label",
                     message=f"'{mapping.target_field_label}' 형식 오류",
                     severity=ValidationSeverity.ERROR,
-                    suggestion="'오브젝트 - 필드명' 형식으로 수정",
+                    suggestion=f"'{get_object_english_name(mapping.target_object)} - 필드명' 형식으로 수정",
                 ))
+            else:
+                prefix = mapping.target_field_label.split(' - ')[0]
+                if prefix not in valid_prefixes and prefix not in korean_prefixes:
+                    errors.append(ValidationErrorItem(
+                        field=f"mappings.{mapping.source_column}.target_field_label",
+                        message=f"'{prefix}' 오브젝트명 오류",
+                        severity=ValidationSeverity.ERROR,
+                        suggestion=f"Lead, People, Organization, Deal 중 하나 사용",
+                    ))
 
         # 5. 기존 필드 ID 검증 (새 필드가 아닌 경우)
         for mapping in result.mappings:

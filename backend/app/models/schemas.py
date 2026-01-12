@@ -43,6 +43,9 @@ class SkipReason(str, Enum):
     ID_INTERNAL = "내부 식별자"
     DUPLICATE = "다른 열과 중복"
     SYSTEM_GENERATED = "시스템 생성 값"
+    META_INFO = "불필요한 메타정보"  # 이관 후 의미없는 정보
+    LOW_QUALITY = "데이터 품질 낮음"  # 빈 값이 80% 이상
+    AUTO_SKIPPED = "자동 제외"  # LLM이 분류하지 않아 자동 제외
 
 
 # ============================================================================

@@ -17,6 +17,24 @@ OBJECT_NAMES = {
     "lead": "리드",
 }
 
+# 영어 오브젝트명 (Export 라벨용)
+OBJECT_ENGLISH_NAMES = {
+    "people": "People",
+    "company": "Organization",  # 조직 → Organization
+    "deal": "Deal",
+    "lead": "Lead",
+}
+
+# 한글 → 영어 오브젝트 매핑 (입력 데이터 변환용)
+KOREAN_TO_OBJECT = {
+    "리드": "lead",
+    "고객": "people",
+    "조직": "company",  # 조직 → Organization으로 출력
+    "회사": "company",
+    "딜": "deal",
+    "거래": "deal",
+}
+
 OBJECT_DESCRIPTIONS = {
     "people": "개인 고객 정보 (연락처, 소속 등)",
     "company": "회사/조직 정보",
@@ -189,11 +207,11 @@ SKIP_COLUMN_PATTERNS = [
 # 빈 값으로 간주할 값들
 EMPTY_VALUES = ['', None, 'null', 'NULL', 'None', 'N/A', 'n/a', '-', '--']
 
-# 최소 유지 비율 (90%)
-MIN_KEEP_RATIO = 0.9
+# 최소 유지 비율 (40% - 핵심 필드만 유지해도 됨)
+MIN_KEEP_RATIO = 0.4
 
-# 최대 제외 컬럼 수
-MAX_SKIP_COLUMNS = 3
+# 최대 제외 컬럼 수 (실제 데이터에서 불필요한 컬럼이 많을 수 있음)
+MAX_SKIP_COLUMNS = 25
 
 
 # ============================================================================
@@ -220,6 +238,16 @@ def get_object_name(object_type: str) -> str:
     return OBJECT_NAMES.get(object_type, object_type)
 
 
+def get_object_english_name(object_type: str) -> str:
+    """오브젝트 타입의 영어 이름 반환 (Export 라벨용)"""
+    return OBJECT_ENGLISH_NAMES.get(object_type, object_type)
+
+
+def korean_to_object_type(korean_name: str) -> str:
+    """한글 오브젝트명을 영어 타입으로 변환"""
+    return KOREAN_TO_OBJECT.get(korean_name, korean_name)
+
+
 def get_connection_requirements(object_type: str) -> list[str]:
     """오브젝트의 연결 필수 조건 반환"""
     return CONNECTION_REQUIREMENTS.get(object_type, [])
@@ -233,9 +261,18 @@ def is_value_empty(value) -> bool:
     return str_value in EMPTY_VALUES or len(str_value) == 0
 
 
-def format_field_label(object_type: str, field_name: str) -> str:
-    """필드 라벨을 '오브젝트 - 필드명' 형식으로 포맷"""
-    obj_name = get_object_name(object_type)
+def format_field_label(object_type: str, field_name: str, use_english: bool = True) -> str:
+    """필드 라벨을 '오브젝트 - 필드명' 형식으로 포맷
+
+    Args:
+        object_type: 오브젝트 타입 (people, company, deal, lead)
+        field_name: 필드명
+        use_english: True면 영어 오브젝트명 사용 (People, Organization 등)
+    """
+    if use_english:
+        obj_name = get_object_english_name(object_type)
+    else:
+        obj_name = get_object_name(object_type)
     return f"{obj_name} - {field_name}"
 
 
