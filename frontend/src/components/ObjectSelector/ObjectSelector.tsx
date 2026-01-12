@@ -330,17 +330,99 @@ export function ObjectSelector({
       )}
 
       {/* Field validation success */}
-      {fieldValidationDone && missingFields.length === 0 && selectedTypes.length > 0 && (
+      {fieldValidationDone && missingFields.length === 0 && selectedTypes.length > 0 && !needsConnectionObject && (
         <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-xl">
           <div className="flex items-center gap-2 text-green-700">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span className="font-medium">필드 검증 완료</span>
+            <span className="font-medium">✓ 다음 단계로 진행할 수 있습니다</span>
           </div>
           <p className="text-sm text-green-600 mt-1">
-            모든 필수 필드가 세일즈맵에 존재합니다. 다음 단계로 진행할 수 있습니다.
+            모든 필수 필드가 세일즈맵에 존재합니다.
           </p>
+        </div>
+      )}
+
+      {/* Progress blocking reasons */}
+      {selectedTypes.length > 0 && (
+        <div className="mt-6 p-4 bg-slate-100 border border-slate-200 rounded-xl">
+          <h4 className="font-medium text-slate-700 mb-3 flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            다음 단계 진행 조건
+          </h4>
+          <div className="space-y-2 text-sm">
+            {/* Condition 1: Object types selected */}
+            <div className="flex items-center gap-2">
+              {selectedTypes.length > 0 ? (
+                <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" strokeWidth={2} />
+                </svg>
+              )}
+              <span className={selectedTypes.length > 0 ? 'text-green-700' : 'text-slate-500'}>
+                오브젝트 선택 완료
+              </span>
+            </div>
+
+            {/* Condition 2: Connection object (if deal/lead selected) */}
+            {hasDealOrLead && (
+              <div className="flex items-center gap-2">
+                {hasCompanyOrPeople ? (
+                  <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                )}
+                <span className={hasCompanyOrPeople ? 'text-green-700' : 'text-orange-600 font-medium'}>
+                  {hasCompanyOrPeople ? '연결 오브젝트 선택됨' : '회사 또는 고객 선택 필요 (딜/리드 연결용)'}
+                </span>
+              </div>
+            )}
+
+            {/* Condition 3: Field validation */}
+            <div className="flex items-center gap-2">
+              {isFetchingFields ? (
+                <svg className="w-4 h-4 text-blue-600 animate-spin" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : fieldValidationDone ? (
+                missingFields.length === 0 ? (
+                  <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                )
+              ) : (
+                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" strokeWidth={2} />
+                </svg>
+              )}
+              <span className={
+                isFetchingFields ? 'text-blue-600' :
+                fieldValidationDone && missingFields.length === 0 ? 'text-green-700' :
+                fieldValidationDone && missingFields.length > 0 ? 'text-red-600 font-medium' :
+                'text-slate-500'
+              }>
+                {isFetchingFields ? '필드 검증 중...' :
+                 fieldValidationDone && missingFields.length === 0 ? '필드 검증 완료' :
+                 fieldValidationDone && missingFields.length > 0 ? `누락된 필드 ${missingFields.length}개 (위에서 확인)` :
+                 '필드 검증 대기'}
+              </span>
+            </div>
+          </div>
         </div>
       )}
 

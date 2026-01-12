@@ -13,9 +13,10 @@ interface DisplayMessage {
   content: string;
 }
 
-const INITIAL_MESSAGE_NO_FILE = '안녕하세요! B2B 영업 CRM 데이터 가져오기를 도와드릴게요. 먼저 가져올 데이터 파일이 있으시면 위에서 업로드해주세요. 없으시면 바로 대화를 시작해도 됩니다!';
-const INITIAL_MESSAGE_WITH_FILE = (filename: string, columns: string[]) =>
-  `파일을 확인했어요! 📊\n\n**${filename}**\n컬럼: ${columns.slice(0, 5).join(', ')}${columns.length > 5 ? ` 외 ${columns.length - 5}개` : ''}\n\n이 데이터를 어떻게 활용하고 계신가요? 어떤 정보가 가장 중요한지 알려주세요.`;
+interface SuggestedQuestion {
+  text: string;
+  category: string;
+}
 
 export default function ConsultingStep({ onComplete, existingResult }: ConsultingStepProps) {
   // File upload state
@@ -23,6 +24,11 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
   const [fileData, setFileData] = useState<Record<string, unknown>[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Analysis state
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisComplete, setAnalysisComplete] = useState(false);
+  const [suggestedQuestions, setSuggestedQuestions] = useState<SuggestedQuestion[]>([]);
 
   // Chat state
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -73,6 +79,95 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
     };
   }, [uploadedFile, fileData]);
 
+  // Generate suggested questions based on file analysis
+  const generateSuggestedQuestions = useCallback((columns: string[], sampleData: Record<string, unknown>[]) => {
+    const questions: SuggestedQuestion[] = [];
+
+    // Check for common column patterns
+    const hasLead = columns.some(c => c.includes('리드') || c.toLowerCase().includes('lead'));
+    const hasOrg = columns.some(c => c.includes('조직') || c.includes('회사') || c.toLowerCase().includes('company'));
+    const hasPeople = columns.some(c => c.includes('고객') || c.toLowerCase().includes('people') || c.toLowerCase().includes('customer'));
+    const hasDeal = columns.some(c => c.includes('딜') || c.includes('거래') || c.toLowerCase().includes('deal'));
+    const hasEmail = columns.some(c => c.includes('이메일') || c.toLowerCase().includes('email'));
+    const hasPhone = columns.some(c => c.includes('전화') || c.toLowerCase().includes('phone'));
+    const hasDate = columns.some(c => c.includes('날짜') || c.includes('생성') || c.toLowerCase().includes('date'));
+
+    // Business context questions
+    if (hasLead) {
+      questions.push({ text: '이 리드 데이터는 어떤 마케팅 채널에서 수집되었나요?', category: '비즈니스' });
+    }
+    if (hasOrg && hasPeople) {
+      questions.push({ text: '고객과 회사는 어떤 관계로 연결되나요?', category: '데이터 구조' });
+    }
+    if (hasDeal) {
+      questions.push({ text: '딜/거래의 영업 프로세스는 어떻게 되나요?', category: '비즈니스' });
+    }
+
+    // Data quality questions
+    if (hasEmail && hasPhone) {
+      questions.push({ text: '이메일과 전화번호 중 주요 연락 수단은 무엇인가요?', category: '데이터 활용' });
+    }
+    if (hasDate) {
+      questions.push({ text: '날짜 데이터는 어떤 용도로 활용하시나요?', category: '데이터 활용' });
+    }
+
+    // General questions
+    questions.push({ text: '이 데이터로 가장 먼저 하고 싶은 작업은 무엇인가요?', category: '목표' });
+    questions.push({ text: '현재 영업 팀에서 가장 중요하게 보는 지표가 있나요?', category: '비즈니스' });
+
+    return questions.slice(0, 4); // Limit to 4 questions
+  }, []);
+
+  // Analyze file and generate initial analysis
+  const analyzeFile = useCallback(async (file: UploadResponse, data: Record<string, unknown>[]) => {
+    setIsAnalyzing(true);
+
+    const fileContext: FileContext = {
+      filename: file.filename,
+      columns: file.columns,
+      sample_data: data.slice(0, 5),
+      total_rows: file.total_rows,
+    };
+
+    // Generate suggested questions
+    const questions = generateSuggestedQuestions(file.columns, data);
+    setSuggestedQuestions(questions);
+
+    // Create initial analysis message
+    const analysisPrompt = `파일이 업로드되었습니다. 데이터를 분석해서 어떤 CRM 오브젝트(리드, 고객, 회사, 딜)에 적합한지, 주요 컬럼은 무엇인지 간단히 분석해주세요. 그리고 데이터를 더 잘 이해하기 위해 사용자에게 물어볼 질문 1-2개를 제안해주세요.`;
+
+    const initialMessages: ChatMessage[] = [
+      { role: 'user', content: analysisPrompt }
+    ];
+
+    try {
+      const response = await consultingChat(initialMessages, false, fileContext);
+
+      if (response.type === 'message' && response.content) {
+        const welcomeMsg = `📊 **${file.filename}** 분석 완료!\n\n${response.content}`;
+        setMessages([{ id: 'analysis', type: 'bot', content: welcomeMsg }]);
+        setApiMessages([
+          { role: 'user', content: analysisPrompt },
+          { role: 'assistant', content: response.content }
+        ]);
+      } else {
+        // Fallback message
+        const fallbackMsg = `📊 **${file.filename}** 업로드 완료!\n\n**컬럼 ${file.columns.length}개 발견:**\n${file.columns.slice(0, 8).join(', ')}${file.columns.length > 8 ? ` 외 ${file.columns.length - 8}개` : ''}\n\n아래 추천 질문을 선택하거나 직접 질문해주세요.`;
+        setMessages([{ id: 'analysis', type: 'bot', content: fallbackMsg }]);
+        setApiMessages([{ role: 'assistant', content: fallbackMsg }]);
+      }
+    } catch (error) {
+      console.error('Analysis error:', error);
+      const fallbackMsg = `📊 **${file.filename}** 업로드 완료!\n\n데이터에 ${file.columns.length}개의 컬럼이 있습니다.\n아래 추천 질문을 선택하거나 직접 질문해주세요.`;
+      setMessages([{ id: 'analysis', type: 'bot', content: fallbackMsg }]);
+      setApiMessages([{ role: 'assistant', content: fallbackMsg }]);
+    } finally {
+      setIsAnalyzing(false);
+      setAnalysisComplete(true);
+      setChatStarted(true);
+    }
+  }, [generateSuggestedQuestions]);
+
   // Handle file upload
   const handleFile = useCallback(async (file: File) => {
     setIsUploading(true);
@@ -83,17 +178,14 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
       setUploadedFile(result);
       setFileData(result.data || []);
 
-      // Start chat with file context message
-      const welcomeMsg = INITIAL_MESSAGE_WITH_FILE(result.filename, result.columns);
-      setMessages([{ id: 'welcome', type: 'bot', content: welcomeMsg }]);
-      setApiMessages([{ role: 'assistant', content: welcomeMsg }]);
-      setChatStarted(true);
+      // Automatically analyze the file
+      await analyzeFile(result, result.data || []);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : '업로드 실패');
     } finally {
       setIsUploading(false);
     }
-  }, []);
+  }, [analyzeFile]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -108,17 +200,43 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
 
   // Start chat without file
   const startChatWithoutFile = useCallback(() => {
-    setMessages([{ id: 'welcome', type: 'bot', content: INITIAL_MESSAGE_NO_FILE }]);
-    setApiMessages([{ role: 'assistant', content: INITIAL_MESSAGE_NO_FILE }]);
+    const welcomeMsg = '안녕하세요! 세일즈맵 CRM 데이터 가져오기를 도와드릴게요.\n\n파일이 없어도 괜찮아요. 어떤 데이터를 관리하고 계신지 알려주시면 적합한 오브젝트와 필드를 추천해드릴게요.';
+    setMessages([{ id: 'welcome', type: 'bot', content: welcomeMsg }]);
+    setApiMessages([{ role: 'assistant', content: welcomeMsg }]);
     setChatStarted(true);
+    setSuggestedQuestions([
+      { text: '리드/잠재고객 데이터를 관리하고 있어요', category: '데이터 유형' },
+      { text: '고객과 회사 정보를 가져오고 싶어요', category: '데이터 유형' },
+      { text: '영업 기회/딜 데이터가 있어요', category: '데이터 유형' },
+      { text: '여러 종류의 데이터가 섞여있어요', category: '데이터 유형' },
+    ]);
   }, []);
 
-  // Initialize chat if returning to existing result
-  useEffect(() => {
-    if (existingResult) {
-      return;
-    }
-  }, [existingResult]);
+  // Handle suggested question click
+  const handleSuggestedQuestion = useCallback((question: string) => {
+    setInputValue(question);
+    // Auto-send after a brief delay
+    setTimeout(() => {
+      const userMsgId = `user-${Date.now()}`;
+      setMessages(prev => [...prev, { id: userMsgId, type: 'user', content: question }]);
+
+      const newApiMessages: ChatMessage[] = [...apiMessages, { role: 'user', content: question }];
+      setApiMessages(newApiMessages);
+      setInputValue('');
+
+      // Send to API
+      setIsLoading(true);
+      consultingChat(newApiMessages, false, getFileContext())
+        .then(response => {
+          if (response.type === 'message' && response.content) {
+            setMessages(prev => [...prev, { id: `bot-${Date.now()}`, type: 'bot', content: response.content! }]);
+            setApiMessages(prev => [...prev, { role: 'assistant', content: response.content! }]);
+          }
+        })
+        .catch(console.error)
+        .finally(() => setIsLoading(false));
+    }, 100);
+  }, [apiMessages, getFileContext]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -140,18 +258,10 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
     const userMessage = inputValue.trim();
     setInputValue('');
 
-    // Add user message to display
     const userMsgId = `user-${Date.now()}`;
-    setMessages(prev => [
-      ...prev,
-      { id: userMsgId, type: 'user', content: userMessage },
-    ]);
+    setMessages(prev => [...prev, { id: userMsgId, type: 'user', content: userMessage }]);
 
-    // Add to API messages
-    const newApiMessages: ChatMessage[] = [
-      ...apiMessages,
-      { role: 'user', content: userMessage },
-    ];
+    const newApiMessages: ChatMessage[] = [...apiMessages, { role: 'user', content: userMessage }];
     setApiMessages(newApiMessages);
 
     setIsLoading(true);
@@ -160,27 +270,14 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
       const response = await consultingChat(newApiMessages, false, getFileContext());
 
       if (response.type === 'error') {
-        setMessages(prev => [
-          ...prev,
-          { id: `error-${Date.now()}`, type: 'bot', content: response.content || 'AI 응답 오류가 발생했습니다.' },
-        ]);
+        setMessages(prev => [...prev, { id: `error-${Date.now()}`, type: 'bot', content: response.content || 'AI 응답 오류가 발생했습니다.' }]);
       } else if (response.type === 'message' && response.content) {
-        const botMsgId = `bot-${Date.now()}`;
-        setMessages(prev => [
-          ...prev,
-          { id: botMsgId, type: 'bot', content: response.content! },
-        ]);
-        setApiMessages(prev => [
-          ...prev,
-          { role: 'assistant', content: response.content! },
-        ]);
+        setMessages(prev => [...prev, { id: `bot-${Date.now()}`, type: 'bot', content: response.content! }]);
+        setApiMessages(prev => [...prev, { role: 'assistant', content: response.content! }]);
       }
     } catch (error) {
       console.error('Chat error:', error);
-      setMessages(prev => [
-        ...prev,
-        { id: `error-${Date.now()}`, type: 'bot', content: 'AI 서버 연결에 실패했습니다. 잠시 후 다시 시도해주세요.' },
-      ]);
+      setMessages(prev => [...prev, { id: `error-${Date.now()}`, type: 'bot', content: 'AI 서버 연결에 실패했습니다.' }]);
     } finally {
       setIsLoading(false);
     }
@@ -202,17 +299,11 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
         setSummaryData(response.data);
         setShowSummary(true);
       } else {
-        setMessages(prev => [
-          ...prev,
-          { id: `error-${Date.now()}`, type: 'bot', content: '요약 생성에 실패했습니다. 대화를 계속해주세요.' },
-        ]);
+        setMessages(prev => [...prev, { id: `error-${Date.now()}`, type: 'bot', content: '요약 생성에 실패했습니다. 대화를 계속해주세요.' }]);
       }
     } catch (error) {
       console.error('Summary error:', error);
-      setMessages(prev => [
-        ...prev,
-        { id: `error-${Date.now()}`, type: 'bot', content: 'AI 서버 연결에 실패했습니다.' },
-      ]);
+      setMessages(prev => [...prev, { id: `error-${Date.now()}`, type: 'bot', content: 'AI 서버 연결에 실패했습니다.' }]);
     } finally {
       setIsLoading(false);
     }
@@ -251,7 +342,6 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
       answers: [],
     };
 
-    // Pass file data if uploaded
     if (uploadedFile && fileData.length > 0) {
       onComplete(result, { uploadResponse: uploadedFile, data: fileData });
     } else {
@@ -262,40 +352,20 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
   const handleContinueChat = () => {
     setShowSummary(false);
     setSummaryData(null);
-    setMessages(prev => [
-      ...prev,
-      { id: `continue-${Date.now()}`, type: 'bot', content: '더 자세한 내용을 알려주세요. 어떤 부분이 부족한가요?' },
-    ]);
+    setMessages(prev => [...prev, { id: `continue-${Date.now()}`, type: 'bot', content: '더 자세한 내용을 알려주세요. 어떤 부분이 부족한가요?' }]);
   };
 
   const getObjectName = (type: string) => {
-    const names: Record<string, string> = {
-      company: '회사',
-      people: '고객',
-      lead: '리드',
-      deal: '딜',
-    };
+    const names: Record<string, string> = { company: '회사', people: '고객', lead: '리드', deal: '딜' };
     return names[type] || type;
   };
 
   const getFieldTypeName = (type: string) => {
     const names: Record<string, string> = {
-      text: '텍스트',
-      number: '숫자',
-      email: '이메일',
-      phone: '전화번호',
-      date: '날짜',
-      datetime: '날짜+시간',
-      url: 'URL',
-      select: '단일선택',
-      multiselect: '복수선택',
-      boolean: 'True/False',
-      textarea: '긴 텍스트',
-      user: '사용자',
-      users: '사용자(복수)',
-      relation: '연결',
-      pipeline: '파이프라인',
-      pipeline_stage: '파이프라인 단계',
+      text: '텍스트', number: '숫자', email: '이메일', phone: '전화번호',
+      date: '날짜', datetime: '날짜+시간', url: 'URL', select: '단일선택',
+      multiselect: '복수선택', boolean: 'True/False', textarea: '긴 텍스트',
+      user: '사용자', users: '사용자(복수)', relation: '연결',
     };
     return names[type] || type;
   };
@@ -310,9 +380,7 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
             </svg>
           </div>
           <h3 className="text-lg font-semibold text-green-800 mb-2">컨설팅 완료</h3>
-          <p className="text-green-600 mb-4">
-            추천 오브젝트가 설정되었습니다.
-          </p>
+          <p className="text-green-600 mb-4">추천 오브젝트가 설정되었습니다.</p>
           <div className="flex flex-wrap gap-2 justify-center">
             {existingResult.recommendedObjectTypes.map(type => (
               <span key={type} className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">
@@ -360,14 +428,10 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
               <div className="space-y-2">
                 {summaryData.recommended_fields.map((field, idx) => (
                   <div key={idx} className="flex items-center gap-2 text-sm flex-wrap">
-                    <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded">
-                      {getObjectName(field.object_type)}
-                    </span>
+                    <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded">{getObjectName(field.object_type)}</span>
                     <span className="text-slate-700 font-medium">{field.field_label}</span>
                     {field.field_type && (
-                      <span className="px-2 py-0.5 bg-purple-100 text-purple-600 rounded text-xs">
-                        {getFieldTypeName(field.field_type)}
-                      </span>
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-600 rounded text-xs">{getFieldTypeName(field.field_type)}</span>
                     )}
                     <span className="text-slate-500">- {field.reason}</span>
                   </div>
@@ -376,66 +440,53 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
             </div>
           )}
 
-          {/* Column Analysis */}
           {summaryData.column_analysis && (
             <div className="mb-4">
-              <h4 className="font-medium text-slate-700 mb-2">
-                컬럼 분석 결과 (총 {summaryData.column_analysis.total_columns}개)
-              </h4>
-
-              {/* Columns to keep */}
+              <h4 className="font-medium text-slate-700 mb-2">컬럼 분석 결과 (총 {summaryData.column_analysis.total_columns}개)</h4>
               {summaryData.column_analysis.columns_to_keep.length > 0 && (
                 <div className="bg-green-50 rounded-lg p-3 border border-green-200 mb-2">
                   <div className="flex items-center gap-2 mb-2">
                     <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    <span className="font-medium text-green-800 text-sm">
-                      유지할 컬럼 ({summaryData.column_analysis.columns_to_keep.length}개)
-                    </span>
+                    <span className="font-medium text-green-800 text-sm">유지할 컬럼 ({summaryData.column_analysis.columns_to_keep.length}개)</span>
                   </div>
                   <div className="space-y-1.5 text-sm">
-                    {summaryData.column_analysis.columns_to_keep.map((col, idx) => (
+                    {summaryData.column_analysis.columns_to_keep.slice(0, 5).map((col, idx) => (
                       <div key={idx} className="flex items-center gap-2 flex-wrap">
                         <span className="text-green-800 font-medium">{col.column_name}</span>
                         <span className="text-green-600">→</span>
                         {col.target_object && (
-                          <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs">
-                            {getObjectName(col.target_object)}
-                          </span>
+                          <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs">{getObjectName(col.target_object)}</span>
                         )}
-                        <span className="px-1.5 py-0.5 bg-white text-green-700 rounded text-xs border border-green-200">
-                          {getFieldTypeName(col.recommended_type)}
-                        </span>
-                        <span className="text-green-600 text-xs">- {col.reason}</span>
+                        <span className="px-1.5 py-0.5 bg-white text-green-700 rounded text-xs border border-green-200">{getFieldTypeName(col.recommended_type)}</span>
                       </div>
                     ))}
+                    {summaryData.column_analysis.columns_to_keep.length > 5 && (
+                      <p className="text-green-600 text-xs">외 {summaryData.column_analysis.columns_to_keep.length - 5}개 더...</p>
+                    )}
                   </div>
                 </div>
               )}
-
-              {/* Columns to skip */}
               {summaryData.column_analysis.columns_to_skip.length > 0 && (
                 <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
                   <div className="flex items-center gap-2 mb-2">
                     <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                     </svg>
-                    <span className="font-medium text-amber-800 text-sm">
-                      제외 추천 컬럼 ({summaryData.column_analysis.columns_to_skip.length}개)
-                    </span>
+                    <span className="font-medium text-amber-800 text-sm">제외 추천 컬럼 ({summaryData.column_analysis.columns_to_skip.length}개)</span>
                   </div>
                   <div className="space-y-1 text-sm">
-                    {summaryData.column_analysis.columns_to_skip.map((col, idx) => (
+                    {summaryData.column_analysis.columns_to_skip.slice(0, 3).map((col, idx) => (
                       <div key={idx} className="flex items-center gap-2">
                         <span className="text-amber-800 font-medium">{col.column_name}</span>
                         <span className="text-amber-600 text-xs">- {col.reason}</span>
                       </div>
                     ))}
+                    {summaryData.column_analysis.columns_to_skip.length > 3 && (
+                      <p className="text-amber-600 text-xs">외 {summaryData.column_analysis.columns_to_skip.length - 3}개 더...</p>
+                    )}
                   </div>
-                  <p className="text-xs text-amber-700 mt-2">
-                    * 제외 컬럼도 필요하다면 필드 매핑 단계에서 직접 매핑할 수 있습니다
-                  </p>
                 </div>
               )}
             </div>
@@ -444,16 +495,10 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
           <p className="text-slate-600 mb-6">{summaryData.confirmation_message}</p>
 
           <div className="flex gap-3 justify-center">
-            <button
-              onClick={handleContinueChat}
-              className="px-6 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-medium transition-colors"
-            >
+            <button onClick={handleContinueChat} className="px-6 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-medium transition-colors">
               더 이야기하기
             </button>
-            <button
-              onClick={handleConfirmSummary}
-              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
-            >
+            <button onClick={handleConfirmSummary} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
               확인하고 계속하기
             </button>
           </div>
@@ -471,13 +516,13 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
           onDragOver={(e) => e.preventDefault()}
           className="border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-xl p-6 text-center transition-colors"
         >
-          {isUploading ? (
+          {isUploading || isAnalyzing ? (
             <div className="flex flex-col items-center">
               <svg className="animate-spin h-8 w-8 text-blue-600 mb-3" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
-              <p className="text-slate-600">파일 분석 중...</p>
+              <p className="text-slate-600">{isUploading ? '파일 업로드 중...' : 'AI가 데이터를 분석하고 있어요...'}</p>
             </div>
           ) : (
             <>
@@ -486,37 +531,25 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
               </div>
-              <p className="text-slate-700 font-medium mb-1">가져올 데이터 파일이 있으신가요?</p>
-              <p className="text-slate-500 text-sm mb-3">
-                파일을 업로드하면 AI가 데이터를 분석해서 더 정확한 추천을 해드려요
-              </p>
+              <p className="text-slate-700 font-medium mb-1">가져올 데이터 파일을 업로드해주세요</p>
+              <p className="text-slate-500 text-sm mb-3">AI가 파일을 분석해서 적합한 설정을 추천해드려요</p>
               <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors">
                 파일 선택
-                <input
-                  type="file"
-                  className="hidden"
-                  accept=".csv,.xlsx,.xls"
-                  onChange={handleInputChange}
-                />
+                <input type="file" className="hidden" accept=".csv,.xlsx,.xls" onChange={handleInputChange} />
               </label>
               <p className="text-xs text-slate-400 mt-2">CSV, XLSX, XLS 지원</p>
             </>
           )}
 
           {uploadError && (
-            <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-red-600 text-sm">
-              {uploadError}
-            </div>
+            <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-red-600 text-sm">{uploadError}</div>
           )}
         </div>
       )}
 
       {/* Skip file upload button */}
-      {!chatStarted && !isUploading && (
-        <button
-          onClick={startChatWithoutFile}
-          className="w-full py-3 text-slate-600 hover:text-blue-600 text-sm transition-colors"
-        >
+      {!chatStarted && !isUploading && !isAnalyzing && (
+        <button onClick={startChatWithoutFile} className="w-full py-3 text-slate-600 hover:text-blue-600 text-sm transition-colors">
           파일 없이 대화로 시작하기 →
         </button>
       )}
@@ -536,18 +569,31 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
         </div>
       )}
 
+      {/* Suggested questions */}
+      {chatStarted && suggestedQuestions.length > 0 && messages.length < 4 && (
+        <div className="bg-slate-50 rounded-xl p-4">
+          <p className="text-sm text-slate-600 mb-3">💡 추천 질문을 선택하세요:</p>
+          <div className="flex flex-wrap gap-2">
+            {suggestedQuestions.map((q, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSuggestedQuestion(q.text)}
+                disabled={isLoading}
+                className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors disabled:opacity-50"
+              >
+                {q.text}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Chat container */}
       {chatStarted && (
         <>
-          <div
-            ref={chatContainerRef}
-            className="h-[300px] overflow-y-auto bg-slate-50 rounded-xl p-4 space-y-4"
-          >
+          <div ref={chatContainerRef} className="h-[300px] overflow-y-auto bg-slate-50 rounded-xl p-4 space-y-4">
             {messages.map(message => (
-              <div
-                key={message.id}
-                className={`flex ${message.type === 'user' ? 'justify-end' : 'items-start gap-3'}`}
-              >
+              <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'items-start gap-3'}`}>
                 {message.type === 'bot' && (
                   <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
                     <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -555,19 +601,14 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
                     </svg>
                   </div>
                 )}
-                <div
-                  className={`max-w-[80%] px-4 py-3 rounded-2xl whitespace-pre-wrap ${
-                    message.type === 'bot'
-                      ? 'bg-white border border-slate-200 rounded-tl-none text-slate-700'
-                      : 'bg-blue-600 text-white rounded-tr-none'
-                  }`}
-                >
+                <div className={`max-w-[80%] px-4 py-3 rounded-2xl whitespace-pre-wrap ${
+                  message.type === 'bot' ? 'bg-white border border-slate-200 rounded-tl-none text-slate-700' : 'bg-blue-600 text-white rounded-tr-none'
+                }`}>
                   <p>{message.content}</p>
                 </div>
               </div>
             ))}
 
-            {/* Typing indicator */}
             {isLoading && (
               <div className="flex items-start gap-3">
                 <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
@@ -595,7 +636,7 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="데이터 활용 방식을 알려주세요..."
+                placeholder="질문을 입력하세요..."
                 className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 disabled={isLoading}
               />
@@ -612,7 +653,7 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
           </div>
 
           {/* Action buttons */}
-          {messages.length >= 3 && !isLoading && (
+          {messages.length >= 2 && !isLoading && (
             <div className="flex justify-center">
               <button
                 onClick={handleRequestSummary}
@@ -626,9 +667,8 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
             </div>
           )}
 
-          {/* Hint text */}
           <p className="text-center text-sm text-slate-500">
-            충분히 대화를 나눈 후 "컨설팅 정리하기"를 눌러 추천을 확인하세요
+            대화를 나눈 후 "컨설팅 정리하기"를 눌러 추천을 확인하세요
           </p>
         </>
       )}
