@@ -1,7 +1,7 @@
-import { Onboarding } from './pages/Onboarding'
+import { SimpleImport } from './pages/SimpleImport'
 
 function App() {
-  return <Onboarding />
+  return <SimpleImport />
 }
 
 export default App
