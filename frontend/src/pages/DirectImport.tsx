@@ -134,29 +134,6 @@ export function DirectImport() {
     return OBJECT_CONFIGS.filter(config => objectMappings[config.id].enabled);
   }, [objectMappings]);
 
-  // 컬럼별 매핑 현황 (어떤 컬럼이 어디에 매핑되었는지)
-  const _columnMappingStatus = useMemo(() => {
-    const status: Record<string, Array<{ objectType: ObjectType; objectName: string; fieldName: string }>> = {};
-
-    for (const config of enabledObjects) {
-      const mapping = objectMappings[config.id];
-      const fields = salesmapFields[config.id];
-
-      for (const [column, fieldKey] of Object.entries(mapping.columnMappings)) {
-        const field = fields.find(f => f.key === fieldKey);
-        if (field) {
-          if (!status[column]) status[column] = [];
-          status[column].push({
-            objectType: config.id,
-            objectName: config.name,
-            fieldName: field.name,
-          });
-        }
-      }
-    }
-
-    return status;
-  }, [enabledObjects, objectMappings, salesmapFields]);
 
   // 필수 필드 충족 여부 체크
   const isObjectMappingValid = useCallback((objectType: ObjectType) => {
@@ -399,16 +376,6 @@ export function DirectImport() {
     });
   };
 
-  // 연결 필드 변경
-  const _handleConnectionChange = (objectType: ObjectType, field: 'connectionField' | 'connectionColumn', value: string) => {
-    setObjectMappings(prev => ({
-      ...prev,
-      [objectType]: {
-        ...prev[objectType],
-        [field]: value,
-      },
-    }));
-  };
 
   // 자동매핑 핸들러
   const handleAutoMapping = async () => {
