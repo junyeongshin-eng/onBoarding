@@ -367,6 +367,44 @@ async def get_pipelines(request: FetchPipelinesRequest) -> dict:
         return {"success": False, "message": str(e)}
 
 
+# 사용자 목록 조회 API
+@router.post("/users")
+async def get_users(request: ApiKeyValidationRequest) -> dict:
+    """
+    세일즈맵 사용자 목록 조회
+    GET /v2/user
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{SALESMAP_API_BASE}/v2/user",
+                headers={
+                    "Authorization": f"Bearer {request.api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=10.0,
+            )
+
+            print(f"[users] /v2/user -> {response.status_code}")
+
+            if response.status_code == 200:
+                result = response.json()
+                user_list = result.get("data", {}).get("userList", [])
+                return {
+                    "success": True,
+                    "userList": user_list,
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"조회 실패: {response.status_code}",
+                }
+
+    except Exception as e:
+        print(f"[users] Exception: {e}")
+        return {"success": False, "message": str(e)}
+
+
 # AI 자동 매핑 요청/응답 모델
 class AutoMappingRequest(BaseModel):
     columns: list[str]

@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
-import { uploadFile, validateSalesmapApiKey, fetchSalesmapFields, fetchPipelines, salesmapAutoMapping, startImportSession, endImportSession } from '../services/api';
+import { uploadFile, validateSalesmapApiKey, fetchSalesmapFields, fetchPipelines, fetchUsers, salesmapAutoMapping, startImportSession, endImportSession } from '../services/api';
+import type { SalesmapUser } from '../services/api';
 import type { UploadResponse } from '../types';
 import { SearchableSelect, type GroupedOption } from '../components/SearchableSelect';
 
@@ -108,6 +109,9 @@ export function DirectImport() {
   // 파이프라인 목록 (딜/리드용)
   const [dealPipelines, setDealPipelines] = useState<Pipeline[]>([]);
   const [leadPipelines, setLeadPipelines] = useState<Pipeline[]>([]);
+
+  // 사용자 목록 (담당자 매핑용)
+  const [salesmapUsers, setSalesmapUsers] = useState<SalesmapUser[]>([]);
 
   // Step 4: 업로드
   const [isImporting, setIsImporting] = useState(false);
@@ -282,12 +286,19 @@ export function DirectImport() {
           console.log('Parsed fields:', newFields);
           setSalesmapFields(newFields);
 
-          // 파이프라인 목록 조회 (딜/리드용)
+          // 파이프라인 목록 + 사용자 목록 조회
           try {
-            const [dealPipelineData, leadPipelineData] = await Promise.all([
+            const [dealPipelineData, leadPipelineData, usersData] = await Promise.all([
               fetchPipelines(apiKey, 'deal'),
               fetchPipelines(apiKey, 'lead'),
+              fetchUsers(apiKey),
             ]);
+
+            // 사용자 목록
+            if (usersData.success && usersData.userList?.length > 0) {
+              setSalesmapUsers(usersData.userList);
+              console.log('Users loaded:', usersData.userList.length);
+            }
 
             // 딜 파이프라인
             if (dealPipelineData.success && dealPipelineData.pipelineList?.length > 0) {
@@ -460,7 +471,7 @@ export function DirectImport() {
       // 기본 필드 (top-level)
       const body: Record<string, unknown> = {};
       // 커스텀 필드 (fieldList)
-      const fieldList: Array<{ name: string; stringValue?: string; numberValue?: number; booleanValue?: boolean; dateValue?: string }> = [];
+      const fieldList: Array<{ name: string; stringValue?: string; numberValue?: number; booleanValue?: boolean; dateValue?: string; userValueId?: string }> = [];
 
       // 이름(name) 필드 키 찾기 - "이름" 또는 "name"
       const nameFieldKey = fields.find(f => f.key === '이름' || f.key === 'name')?.key || '이름';
@@ -540,9 +551,22 @@ export function DirectImport() {
             continue;
           }
 
-          // 날짜 타입 판별: 선언된 type 또는 필드명에 "날짜"/"date" 포함
+          // 담당자 필드: 이름→userValueId 변환
+          if (fieldKey === '담당자') {
+            const userName = String(value).trim();
+            const matchedUser = salesmapUsers.find(u => u.name.trim() === userName);
+            if (matchedUser) {
+              fieldList.push({ name: fieldKey, userValueId: matchedUser.id });
+            } else {
+              console.warn(`[buildBody] ${objectType} - 담당자 "${userName}" 매칭 실패, 건너뜀`);
+            }
+            continue;
+          }
+
+          // 날짜 타입 판별: 선언된 type, 필드명, 또는 값 형식으로 감지
           const isDateField = fieldDef.type === 'date' || fieldDef.type === 'datetime'
             || /날짜|date/i.test(fieldKey) || /날짜|date/i.test(fieldDef.name);
+          const isDateLikeValue = /^\d{4}[-./]\d{1,2}[-./]\d{1,2}(T\d{2}:\d{2}(:\d{2})?)?/.test(String(value).trim());
 
           // 타입에 따른 처리
           if (fieldDef.type === 'number') {
@@ -551,15 +575,13 @@ export function DirectImport() {
           } else if (fieldDef.type === 'boolean') {
             const boolValue = value === true || value === 'true' || value === 'Y' || value === '예';
             fieldList.push({ name: fieldKey, booleanValue: boolValue });
-          } else if (isDateField) {
+          } else if (isDateField || isDateLikeValue) {
             // 날짜 문자열을 YYYY-MM-DD 또는 ISO 형식으로 변환
             const raw = String(value).trim();
             const normalized = raw.replace(/[./]/g, '-'); // 2026.02.12 → 2026-02-12
             const parsed = new Date(normalized);
             if (!isNaN(parsed.getTime())) {
-              const dateValue = fieldDef.type === 'datetime'
-                ? parsed.toISOString()
-                : parsed.toISOString().split('T')[0]; // YYYY-MM-DD
+              const dateValue = parsed.toISOString().split('T')[0]; // YYYY-MM-DD
               fieldList.push({ name: fieldKey, dateValue });
             } else {
               fieldList.push({ name: fieldKey, dateValue: raw });

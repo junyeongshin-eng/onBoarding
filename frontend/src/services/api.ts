@@ -558,6 +558,36 @@ export async function fetchPipelines(
   }
 }
 
+// 사용자 목록 조회
+export interface SalesmapUser {
+  id: string;
+  name: string;
+}
+
+export interface FetchUsersResponse {
+  success: boolean;
+  userList: SalesmapUser[];
+  message?: string;
+}
+
+export async function fetchUsers(apiKey: string): Promise<FetchUsersResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/salesmap/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+
+    if (!response.ok) {
+      throw new Error('사용자 목록 조회 실패');
+    }
+
+    return response.json();
+  } catch (e) {
+    return { success: false, userList: [], message: '사용자 목록 조회 서버 연결 오류' };
+  }
+}
+
 // AI 필드 매칭 요청
 export interface FieldMatchRequest {
   error_columns: string[];
