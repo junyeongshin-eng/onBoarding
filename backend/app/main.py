@@ -1,8 +1,11 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import upload, imports, ai, export
+from app.routers import upload, imports, ai, export, salesmap, admin
 
 app = FastAPI(title="Salesmap 데이터 가져오기 API", version="1.0.0")
 
@@ -22,6 +25,8 @@ app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(imports.router, prefix="/api", tags=["import"])
 app.include_router(ai.router, prefix="/api", tags=["ai"])
 app.include_router(export.router, prefix="/api", tags=["export"])
+app.include_router(salesmap.router, prefix="/api", tags=["salesmap"])
+app.include_router(admin.router, prefix="/api", tags=["admin"])
 
 
 @app.get("/api/health")

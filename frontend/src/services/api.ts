@@ -516,3 +516,204 @@ export async function downloadExport(downloadUrl: string): Promise<void> {
   document.body.removeChild(a);
   window.URL.revokeObjectURL(url);
 }
+
+// 파이프라인 조회
+export interface PipelineStage {
+  id: string;
+  name: string;
+  index: number;
+  description?: string;
+}
+
+export interface Pipeline {
+  id: string;
+  name: string;
+  pipelineStageList: PipelineStage[];
+}
+
+export interface FetchPipelinesResponse {
+  success: boolean;
+  pipelineList: Pipeline[];
+  message?: string;
+}
+
+export async function fetchPipelines(
+  apiKey: string,
+  objectType: string
+): Promise<FetchPipelinesResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/salesmap/pipelines`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey, object_type: objectType }),
+    });
+
+    if (!response.ok) {
+      throw new Error('파이프라인 조회 실패');
+    }
+
+    return response.json();
+  } catch (e) {
+    return { success: false, pipelineList: [], message: '파이프라인 조회 서버 연결 오류' };
+  }
+}
+
+// AI 필드 매칭 요청
+export interface FieldMatchRequest {
+  error_columns: string[];
+  available_fields: Record<string, string[]>;
+}
+
+export interface FieldMatchResponse {
+  success: boolean;
+  mappings: Record<string, string>;
+  error?: string;
+}
+
+export async function matchFieldsWithAI(request: FieldMatchRequest): Promise<FieldMatchResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/ai/match-fields`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      return { success: false, mappings: {}, error: error.detail || 'AI 매칭 실패' };
+    }
+
+    return await response.json();
+  } catch (e) {
+    return { success: false, mappings: {}, error: 'AI 서버 연결 실패' };
+  }
+}
+
+// ============================================================================
+// Import Session (Admin 로깅용)
+// ============================================================================
+
+export async function startImportSession(
+  filename: string,
+  totalRows: number,
+  objectTypes: string[],
+): Promise<{ session_id: string }> {
+  const response = await fetch(`${API_BASE}/salesmap/session/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, total_rows: totalRows, object_types: objectTypes }),
+  });
+  return response.json();
+}
+
+export async function endImportSession(
+  sessionId: string,
+): Promise<{ success: boolean; summary?: Record<string, unknown> }> {
+  const response = await fetch(`${API_BASE}/salesmap/session/${sessionId}/end`, {
+    method: 'POST',
+  });
+  return response.json();
+}
+
+// ============================================================================
+// Admin API
+// ============================================================================
+
+export async function adminLogin(password: string): Promise<{ success: boolean; message?: string }> {
+  const response = await fetch(`${API_BASE}/admin/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  return response.json();
+}
+
+export async function getAdminSessions(password: string): Promise<{ sessions: AdminSession[] }> {
+  const response = await fetch(`${API_BASE}/admin/sessions`, {
+    headers: { 'X-Admin-Password': password },
+  });
+  if (!response.ok) throw new Error('인증 실패');
+  return response.json();
+}
+
+export async function getAdminSessionDetail(password: string, sessionId: string): Promise<AdminSessionDetail> {
+  const response = await fetch(`${API_BASE}/admin/sessions/${sessionId}`, {
+    headers: { 'X-Admin-Password': password },
+  });
+  if (!response.ok) throw new Error('인증 실패');
+  return response.json();
+}
+
+export interface AdminSession {
+  id: string;
+  filename: string;
+  total_rows: number;
+  object_types: string[];
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  summary: {
+    total_requests: number;
+    success: number;
+    failed: number;
+    by_type: Record<string, { success: number; failed: number }>;
+  } | null;
+}
+
+export interface AdminRowResult {
+  row_index: number;
+  object_type: string;
+  request: Record<string, unknown>;
+  response: Record<string, unknown>;
+  success: boolean;
+  error: string | null;
+  timestamp: string;
+}
+
+export interface AdminSessionDetail extends AdminSession {
+  results: AdminRowResult[];
+}
+
+// Salesmap Direct Import - AI Auto Mapping
+export interface SalesmapAutoMappingRequest {
+  columns: string[];
+  sample_data: Record<string, unknown>[];
+  available_fields: Record<string, Array<{ id: string; label?: string; name?: string; required?: boolean }>>;
+  enabled_objects: string[];
+}
+
+export interface SalesmapFieldMapping {
+  column: string;
+  object_type: string | null;
+  field_key: string | null;
+  field_name: string | null;
+  confidence: number;
+  reason: string | null;
+}
+
+export interface SalesmapAutoMappingResponse {
+  success: boolean;
+  mappings: SalesmapFieldMapping[];
+  error?: string;
+}
+
+export async function salesmapAutoMapping(
+  request: SalesmapAutoMappingRequest
+): Promise<SalesmapAutoMappingResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/salesmap/auto-mapping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      return { success: false, mappings: [], error: error.detail || 'AI 자동 매핑 실패' };
+    }
+
+    return await response.json();
+  } catch (e) {
+    return { success: false, mappings: [], error: 'AI 서버 연결 실패' };
+  }
+}

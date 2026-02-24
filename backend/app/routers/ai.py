@@ -150,6 +150,90 @@ async def map_fields(request: MappingRequest) -> MappingResponse:
         )
 
 
+class FieldMatchRequest(BaseModel):
+    """필드 매칭 요청"""
+    error_columns: list[str]  # 오류가 난 컬럼명들
+    available_fields: dict[str, list[str]]  # 오브젝트별 사용 가능한 필드 목록
+
+
+class FieldMatchResponse(BaseModel):
+    """필드 매칭 응답"""
+    success: bool
+    mappings: dict[str, str]  # 원본 컬럼 → 추천 필드
+    error: Optional[str] = None
+
+
+@router.post("/match-fields", response_model=FieldMatchResponse)
+async def match_fields(request: FieldMatchRequest) -> FieldMatchResponse:
+    """
+    AI 기반 필드 매칭
+
+    - 오류가 난 컬럼명을 분석
+    - 같은 오브젝트에서 가장 비슷한 필드를 우선 추천
+    - 없으면 다른 오브젝트에서 비슷한 필드 추천
+    """
+    try:
+        llm = get_llm_provider()
+
+        # 사용 가능한 필드 목록을 텍스트로 변환
+        fields_text = ""
+        for obj_type, fields in request.available_fields.items():
+            fields_text += f"\n### {obj_type}\n"
+            fields_text += ", ".join(fields)
+
+        system_prompt = """당신은 CRM 데이터 필드 매칭 전문가입니다.
+사용자의 컬럼명을 분석하여 세일즈맵 필드에 매핑합니다.
+
+## 매칭 규칙
+1. 같은 오브젝트에서 가장 비슷한 필드를 우선 선택
+2. 컬럼명의 의미와 필드명의 의미를 비교
+3. 정확히 매칭되지 않아도 가장 적절한 필드 선택
+4. 모든 컬럼은 반드시 하나의 필드에 매핑
+
+## 응답 형식
+JSON 형식으로 응답하세요:
+{
+  "mappings": {
+    "원본컬럼1": "People - 추천필드1",
+    "원본컬럼2": "Organization - 추천필드2"
+  }
+}"""
+
+        user_prompt = f"""## 매핑이 필요한 컬럼
+{', '.join(request.error_columns)}
+
+## 사용 가능한 세일즈맵 필드
+{fields_text}
+
+위 컬럼들을 가장 적절한 세일즈맵 필드에 매핑해주세요.
+컬럼명에서 오브젝트 prefix(People, Organization 등)가 있다면 해당 오브젝트의 필드에서 먼저 찾아주세요."""
+
+        response = await llm.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+
+        if response.success and response.parsed_json:
+            mappings = response.parsed_json.get("mappings", {})
+            return FieldMatchResponse(
+                success=True,
+                mappings=mappings,
+            )
+        else:
+            return FieldMatchResponse(
+                success=False,
+                mappings={},
+                error=response.error or "AI 매칭 실패",
+            )
+
+    except Exception as e:
+        return FieldMatchResponse(
+            success=False,
+            mappings={},
+            error=str(e),
+        )
+
+
 class AnalyzeRequest(BaseModel):
     """파일 분석 요청"""
     data: list[dict]

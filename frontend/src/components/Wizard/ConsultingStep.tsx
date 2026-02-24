@@ -28,7 +28,7 @@ export default function ConsultingStep({ onComplete, existingResult }: Consultin
 
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisComplete, setAnalysisComplete] = useState(false);
+  const [, setAnalysisComplete] = useState(false);
   const [suggestedInsights, setSuggestedInsights] = useState<SuggestedInsight[]>([]);
 
   // Chat state

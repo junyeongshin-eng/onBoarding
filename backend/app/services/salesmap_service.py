@@ -9,6 +9,7 @@ SALESMAP_ENDPOINTS = {
     "deal": "deal",
     "lead": "lead",
     "company": "organization",
+    "organization": "organization",  # organization도 지원
 }
 
 # Korean names for objects
@@ -17,6 +18,7 @@ OBJECT_NAMES_KR = {
     "deal": "딜",
     "lead": "리드",
     "company": "회사",
+    "organization": "회사",  # organization도 지원
 }
 
 
@@ -302,6 +304,10 @@ def infer_field_type(records: list, field_name: str) -> str:
         "expected_date": "datetime",
         "subscription_start": "datetime",
         "subscription_end": "datetime",
+        "생성 날짜": "datetime",
+        "수정 날짜": "datetime",
+        "마감일": "date",
+        "예상 마감일": "date",
 
         # Boolean fields
         "unsubscribed": "boolean",
@@ -358,9 +364,12 @@ def infer_field_type(records: list, field_name: str) -> str:
         if isinstance(value, dict):
             return "relation"
         if isinstance(value, str):
-            # Check for date patterns
-            if len(value) == 10 and value[4] == "-" and value[7] == "-":
+            # Check for date patterns (YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD)
+            if len(value) == 10 and value[4] in ("-", ".", "/") and value[7] in ("-", ".", "/"):
                 return "date"
+            # ISO datetime (2024-04-16T07:18:17.516Z)
+            if len(value) >= 19 and value[4] == "-" and value[10] == "T":
+                return "datetime"
             if "@" in value and "." in value:
                 return "email"
 
@@ -382,6 +391,7 @@ def is_required_field(object_type: str, field_name: str) -> bool:
         "people": ["name", "이름"],
         # 회사 (Organization) - 이름만 필수
         "company": ["name", "이름"],
+        "organization": ["name", "이름"],  # organization도 지원
         # 리드 (Lead) - 이름만 필수
         "lead": ["name", "이름"],
         # 딜 (Deal) - 이름만 필수
@@ -400,10 +410,12 @@ def is_system_field(field_name: str) -> bool:
         "id", "created_at", "updated_at", "workspace_id",
         "_id", "__v", "createdAt", "updatedAt",
         # Korean system field names
-        "수정 날짜", "생성 날짜", "총 매출", "팀",
+        "RecordId", "recordId",
+        "수정 날짜", "총 매출", "팀",
         "진행중 딜 개수", "완료 TODO", "실패된 딜 개수", "성사된 딜 개수",
         "미완료 TODO", "리드 개수", "딜 개수", "누적 시퀀스 등록수",
         "전체 TODO", "현재 진행중인 시퀀스 여부",
+        "연결된 고객 수", "종료된 딜 수",
     }
 
     if field_name in system_fields:
@@ -416,8 +428,11 @@ def is_system_field(field_name: str) -> bool:
     ]
 
     system_suffixes = [
-        " 개수",      # "~ 개수" - Count fields (auto-calculated)
-        " 목록",      # "~ 목록" - List fields (auto-recorded)
+        " 개수",        # "~ 개수" - Count fields (auto-calculated)
+        " 목록",        # "~ 목록" - List fields (auto-recorded)
+        "진입한 날짜",   # 파이프라인 단계 진입 날짜 (auto-recorded)
+        "퇴장한 날짜",   # 파이프라인 단계 퇴장 날짜 (auto-recorded)
+        "누적 시간",     # 파이프라인 단계 체류 시간 (auto-calculated)
     ]
 
     for pattern in system_patterns:
@@ -509,4 +524,7 @@ def get_default_fields(object_type: str) -> list:
             {"id": "main_quote_products", "label": "메인 견적 상품 리스트", "type": "multiselect", "required": False, "is_system": False, "editable": True},
         ],
     }
+    # organization은 company와 같은 필드 사용
+    if object_type == "organization":
+        return defaults.get("company", [])
     return defaults.get(object_type, [])

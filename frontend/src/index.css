@@ -1,7 +1,35 @@
 @import "tailwindcss";
 
-body {
+:root {
+  /* Colors from design */
+  --color-background: #F2F3F0;
+  --color-sidebar: #E7E8E5;
+  --color-card: #FFFFFF;
+  --color-border: #CBCCC9;
+  --color-primary: #FF8400;
+  --color-primary-hover: #E67700;
+  --color-foreground: #111111;
+  --color-muted: #666666;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+}
+
+html, body {
   margin: 0;
-  min-height: 100vh;
-  background-color: #f8fafc;
+  height: 100%;
+  background-color: var(--color-background);
+}
+
+#root {
+  height: 100%;
+}
+
+/* Font family utilities */
+.font-primary {
+  font-family: "JetBrains Mono", monospace;
+}
+
+.font-secondary {
+  font-family: "Geist", "Inter", sans-serif;
 }

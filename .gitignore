@@ -1,1 +1,7 @@
 .env
+__pycache__/
+*.pyc
+backend/app/data/
+node_modules/
+dist/
+backend/app/exports/
