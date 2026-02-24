@@ -135,7 +135,7 @@ export function DirectImport() {
   }, [objectMappings]);
 
   // 컬럼별 매핑 현황 (어떤 컬럼이 어디에 매핑되었는지)
-  const columnMappingStatus = useMemo(() => {
+  const _columnMappingStatus = useMemo(() => {
     const status: Record<string, Array<{ objectType: ObjectType; objectName: string; fieldName: string }>> = {};
 
     for (const config of enabledObjects) {
@@ -278,8 +278,8 @@ export function DirectImport() {
             }
           }
           // fields 객체 형태 처리 (기존 방식)
-          else if (fieldsResult.fields) {
-            for (const [objType, fields] of Object.entries(fieldsResult.fields)) {
+          else if ((fieldsResult as any).fields) {
+            for (const [objType, fields] of Object.entries((fieldsResult as any).fields)) {
               if (objType in newFields) {
                 const parsedFields2 = (fields as any[]).map(f => ({
                   id: f.id || f.key,
@@ -400,7 +400,7 @@ export function DirectImport() {
   };
 
   // 연결 필드 변경
-  const handleConnectionChange = (objectType: ObjectType, field: 'connectionField' | 'connectionColumn', value: string) => {
+  const _handleConnectionChange = (objectType: ObjectType, field: 'connectionField' | 'connectionColumn', value: string) => {
     setObjectMappings(prev => ({
       ...prev,
       [objectType]: {

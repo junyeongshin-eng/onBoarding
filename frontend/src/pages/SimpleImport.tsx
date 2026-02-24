@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { validateSalesmapApiKey, fetchSalesmapFields, fetchPipelines, uploadFile, matchFieldsWithAI } from '../services/api';
-import type { Pipeline, PipelineStage } from '../services/api';
+import type { Pipeline } from '../services/api';
 import type { SalesmapField, UploadResponse } from '../types';
 import * as XLSX from 'xlsx';
 
