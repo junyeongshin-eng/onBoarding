@@ -801,10 +801,8 @@ export function DirectImport() {
         {/* Logo */}
         <div className="flex h-[88px] items-center justify-center border-b border-[#CBCCC9] px-8">
           <div className="flex items-center gap-2">
-            <span className="material-symbols-rounded text-[#FF8400]" style={{ fontSize: 32 }}>
-              database
-            </span>
-            <span className="font-primary text-lg font-bold text-[#FF8400]">
+            <img src="/salesmap-logo.png" alt="Salesmap" className="h-8 w-8 rounded" />
+            <span className="font-primary text-lg font-bold text-[#111111]">
               Salesmap
             </span>
           </div>
