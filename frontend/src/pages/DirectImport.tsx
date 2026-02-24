@@ -32,10 +32,9 @@ const EXCLUDED_FIELD_KEYWORDS = [
   'RecordId', 'recordId',
 ];
 
-// 파이프라인 설정 UI에서 별도 관리하므로 필드 매핑에서 제외할 필드
-const PIPELINE_FIELD_IDS = [
-  '파이프라인', '파이프라인 단계', '상태',
-  'pipeline', 'pipeline_stage', 'pipeline_id', 'pipeline_stage_id', 'status',
+// 상태(status) 필드만 매핑에서 제외 (파이프라인/단계는 행별 매핑 허용)
+const STATUS_ONLY_FIELD_IDS = [
+  '상태', 'status',
 ];
 
 // API에서 가져온 필드 타입
@@ -225,11 +224,11 @@ export function DirectImport() {
                     return !EXCLUDED_FIELD_KEYWORDS.some(kw => label.includes(kw) || id.includes(kw));
                   })
                   .filter((f: any) => {
-                    // deal/lead: 파이프라인, 단계, 상태는 별도 UI에서 관리
+                    // deal/lead: 상태만 별도 UI에서 관리 (파이프라인/단계는 행별 매핑 허용)
                     if (objType === 'deal' || objType === 'lead') {
                       const id = f.id || '';
                       const label = f.label || '';
-                      return !PIPELINE_FIELD_IDS.includes(id) && !PIPELINE_FIELD_IDS.includes(label);
+                      return !STATUS_ONLY_FIELD_IDS.includes(id) && !STATUS_ONLY_FIELD_IDS.includes(label);
                     }
                     return true;
                   })
@@ -531,6 +530,16 @@ export function DirectImport() {
             continue;
           }
 
+          // 파이프라인/단계 필드는 임시 키로 저장 (이름→ID 변환용)
+          if (fieldKey === '파이프라인' || fieldKey === 'pipeline') {
+            body.__pipelineName = String(value);
+            continue;
+          }
+          if (fieldKey === '파이프라인 단계' || fieldKey === 'pipeline_stage') {
+            body.__pipelineStageName = String(value);
+            continue;
+          }
+
           // 날짜 타입 판별: 선언된 type 또는 필드명에 "날짜"/"date" 포함
           const isDateField = fieldDef.type === 'date' || fieldDef.type === 'datetime'
             || /날짜|date/i.test(fieldKey) || /날짜|date/i.test(fieldDef.name);
@@ -680,10 +689,25 @@ export function DirectImport() {
           if (!body.status) {
             body.status = mapping.defaultStatus || 'In progress';
           }
-          if (mapping.pipelineId) {
+
+          // 파이프라인 이름→ID 변환 (행별 매핑)
+          if (body.__pipelineName) {
+            const matched = dealPipelines.find(p => p.name.trim() === String(body.__pipelineName).trim());
+            if (matched) {
+              body.pipelineId = matched.id;
+              if (body.__pipelineStageName) {
+                const stage = matched.pipelineStageList.find(s => s.name.trim() === String(body.__pipelineStageName).trim());
+                if (stage) body.pipelineStageId = stage.id;
+              }
+            }
+            delete body.__pipelineName;
+            delete body.__pipelineStageName;
+          }
+          // fallback: 매칭 실패 또는 값 없음 → UI 설정값
+          if (!body.pipelineId && mapping.pipelineId) {
             body.pipelineId = mapping.pipelineId;
           }
-          if (mapping.pipelineStageId) {
+          if (!body.pipelineStageId && mapping.pipelineStageId) {
             body.pipelineStageId = mapping.pipelineStageId;
           }
 
@@ -721,11 +745,24 @@ export function DirectImport() {
             body.peopleId = peopleId;
           }
 
-          // 리드 파이프라인 설정 (선택 사항이지만 권장)
-          if (mapping.pipelineId) {
+          // 파이프라인 이름→ID 변환 (행별 매핑)
+          if (body.__pipelineName) {
+            const matched = leadPipelines.find(p => p.name.trim() === String(body.__pipelineName).trim());
+            if (matched) {
+              body.pipelineId = matched.id;
+              if (body.__pipelineStageName) {
+                const stage = matched.pipelineStageList.find(s => s.name.trim() === String(body.__pipelineStageName).trim());
+                if (stage) body.pipelineStageId = stage.id;
+              }
+            }
+            delete body.__pipelineName;
+            delete body.__pipelineStageName;
+          }
+          // fallback: 매칭 실패 또는 값 없음 → UI 설정값
+          if (!body.pipelineId && mapping.pipelineId) {
             body.pipelineId = mapping.pipelineId;
           }
-          if (mapping.pipelineStageId) {
+          if (!body.pipelineStageId && mapping.pipelineStageId) {
             body.pipelineStageId = mapping.pipelineStageId;
           }
 
@@ -1071,7 +1108,7 @@ export function DirectImport() {
                     {/* 딜 설정 */}
                     {objectMappings.deal.enabled && (
                       <div className="flex flex-col gap-2">
-                        <span className="font-primary text-sm font-semibold text-[#FF8400]">딜 필수 설정</span>
+                        <span className="font-primary text-sm font-semibold text-[#FF8400]">딜 기본 설정 (매핑 없는 행에 적용)</span>
                         <div className="flex flex-wrap items-center gap-3">
                           <div className="flex items-center gap-2">
                             <span className="font-secondary text-xs text-[#666666]">상태:</span>
