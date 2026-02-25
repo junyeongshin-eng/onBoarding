@@ -106,6 +106,9 @@ export function DirectImport() {
   // 자동매핑
   const [isAutoMapping, setIsAutoMapping] = useState(false);
 
+  // 중복 시 자동 업데이트 (upsert) 토글
+  const [upsertEnabled, setUpsertEnabled] = useState(true);
+
   // 파이프라인 목록 (딜/리드용)
   const [dealPipelines, setDealPipelines] = useState<Pipeline[]>([]);
   const [leadPipelines, setLeadPipelines] = useState<Pipeline[]>([]);
@@ -627,9 +630,17 @@ export function DirectImport() {
 
       console.log(`[createObject] ${objectType} - Response:`, result);
 
-      // 중복 실패 시 자동 업데이트 (upsert)
+      // 중복 실패 시 처리
       if (!result.success && result.data?.id) {
         const duplicateId = result.data.id;
+
+        // upsert 비활성 → 업데이트 시도 없이 중복 ID만 반환 (연결용)
+        if (!upsertEnabled) {
+          console.log(`[createObject] ${objectType} - Duplicate detected (id: ${duplicateId}), upsert disabled → skip update`);
+          return { success: false, data: { id: duplicateId }, message: result.message || '중복 데이터 (업데이트 꺼짐)', reason: result.reason };
+        }
+
+        // upsert 활성 → 자동 업데이트
         console.log(`[createObject] ${objectType} - Duplicate detected (id: ${duplicateId}), attempting update...`);
 
         const updateResponse = await fetch(`${API_BASE}/salesmap/proxy${config.endpoint}/${duplicateId}`, {
@@ -978,6 +989,16 @@ export function DirectImport() {
 
           {currentStep === 2 && (
             <div className="flex items-center gap-3">
+              {/* 중복 시 자동 업데이트 토글 */}
+              <button
+                onClick={() => setUpsertEnabled(prev => !prev)}
+                className="flex items-center gap-2 rounded-full border border-[#CBCCC9] bg-white px-4 py-2 transition-colors hover:bg-[#F2F3F0]"
+              >
+                <span className="font-secondary text-sm text-[#666666]">중복 시 자동 업데이트</span>
+                <div className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${upsertEnabled ? 'bg-[#FF8400]' : 'bg-[#CBCCC9]'}`}>
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${upsertEnabled ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                </div>
+              </button>
               <button
                 onClick={() => goToStep(1)}
                 className="flex h-10 items-center justify-center gap-1.5 rounded-full border border-[#CBCCC9] bg-[#F2F3F0] px-4 font-primary text-sm font-medium text-[#111111] hover:bg-[#E7E8E5] transition-colors"
