@@ -123,6 +123,7 @@ export function DirectImport() {
   });
   const [importResults, setImportResults] = useState<Record<ObjectType, {
     success: number;
+    updated: number;
     failed: number;
     errors: { row: number; message: string }[];
   } | null>>({
@@ -455,11 +456,11 @@ export function DirectImport() {
     }
 
     // 각 오브젝트별 결과 초기화
-    const resultsMap: Record<ObjectType, { success: number; failed: number; errors: { row: number; message: string }[] }> = {
-      people: { success: 0, failed: 0, errors: [] },
-      organization: { success: 0, failed: 0, errors: [] },
-      deal: { success: 0, failed: 0, errors: [] },
-      lead: { success: 0, failed: 0, errors: [] },
+    const resultsMap: Record<ObjectType, { success: number; updated: number; failed: number; errors: { row: number; message: string }[] }> = {
+      people: { success: 0, updated: 0, failed: 0, errors: [] },
+      organization: { success: 0, updated: 0, failed: 0, errors: [] },
+      deal: { success: 0, updated: 0, failed: 0, errors: [] },
+      lead: { success: 0, updated: 0, failed: 0, errors: [] },
     };
 
     // 헬퍼 함수: API 호출 및 body 생성
@@ -602,7 +603,7 @@ export function DirectImport() {
       return body;
     };
 
-    const createObject = async (objectType: ObjectType, body: Record<string, unknown>, rowIndex: number) => {
+    const createObject = async (objectType: ObjectType, body: Record<string, unknown>, rowIndex: number): Promise<{ success: boolean; data?: any; message?: string; reason?: string; wasUpdated?: boolean }> => {
       const config = OBJECT_CONFIGS.find(c => c.id === objectType)!;
       const requestBody = { data: body };
 
@@ -626,6 +627,28 @@ export function DirectImport() {
 
       console.log(`[createObject] ${objectType} - Response:`, result);
 
+      // 중복 실패 시 자동 업데이트 (upsert)
+      if (!result.success && result.data?.id) {
+        const duplicateId = result.data.id;
+        console.log(`[createObject] ${objectType} - Duplicate detected (id: ${duplicateId}), attempting update...`);
+
+        const updateResponse = await fetch(`${API_BASE}/salesmap/proxy${config.endpoint}/${duplicateId}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody),
+        });
+        const updateResult = await updateResponse.json();
+
+        console.log(`[createObject] ${objectType} - Update response:`, updateResult);
+
+        // 업데이트 성공 시 원래 중복 ID를 data에 포함시켜 반환
+        if (updateResult.success) {
+          return { ...updateResult, data: { ...updateResult.data, id: duplicateId }, wasUpdated: true };
+        }
+        // 업데이트도 실패하면 실패 반환 (중복 ID는 유지)
+        return { ...updateResult, data: { id: duplicateId }, wasUpdated: false };
+      }
+
       return result;
     };
 
@@ -644,8 +667,16 @@ export function DirectImport() {
           if (result.success && result.data) {
             // API 응답에서 organizationId 추출
             organizationId = result.data.organization?.id || result.data.id || null;
-            resultsMap.organization.success++;
+            if (result.wasUpdated) {
+              resultsMap.organization.updated++;
+            } else {
+              resultsMap.organization.success++;
+            }
           } else {
+            // 실패했지만 중복 ID가 있으면 연결용으로 사용
+            if (result.data?.id) {
+              organizationId = result.data.id;
+            }
             resultsMap.organization.failed++;
             resultsMap.organization.errors.push({
               row: i + 1,
@@ -676,8 +707,16 @@ export function DirectImport() {
           if (result.success && result.data) {
             // API 응답에서 peopleId 추출
             peopleId = result.data.people?.id || result.data.id || null;
-            resultsMap.people.success++;
+            if (result.wasUpdated) {
+              resultsMap.people.updated++;
+            } else {
+              resultsMap.people.success++;
+            }
           } else {
+            // 실패했지만 중복 ID가 있으면 연결용으로 사용
+            if (result.data?.id) {
+              peopleId = result.data.id;
+            }
             resultsMap.people.failed++;
             resultsMap.people.errors.push({
               row: i + 1,
@@ -736,7 +775,11 @@ export function DirectImport() {
           const result = await createObject('deal', body, i);
 
           if (result.success) {
-            resultsMap.deal.success++;
+            if (result.wasUpdated) {
+              resultsMap.deal.updated++;
+            } else {
+              resultsMap.deal.success++;
+            }
           } else {
             resultsMap.deal.failed++;
             resultsMap.deal.errors.push({
@@ -791,7 +834,11 @@ export function DirectImport() {
           const result = await createObject('lead', body, i);
 
           if (result.success) {
-            resultsMap.lead.success++;
+            if (result.wasUpdated) {
+              resultsMap.lead.updated++;
+            } else {
+              resultsMap.lead.success++;
+            }
           } else {
             resultsMap.lead.failed++;
             resultsMap.lead.errors.push({
@@ -1446,6 +1493,15 @@ export function DirectImport() {
                         <span className="font-primary text-lg font-bold text-[#22c55e]">{result.success}</span>
                         <span className="font-secondary text-sm text-[#666666]">성공</span>
                       </div>
+                      {result.updated > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="material-symbols-rounded text-[#3b82f6]" style={{ fontSize: 20 }}>
+                            sync
+                          </span>
+                          <span className="font-primary text-lg font-bold text-[#3b82f6]">{result.updated}</span>
+                          <span className="font-secondary text-sm text-[#666666]">업데이트</span>
+                        </div>
+                      )}
                       {result.failed > 0 && (
                         <div className="flex items-center gap-2">
                           <span className="material-symbols-rounded text-[#ef4444]" style={{ fontSize: 20 }}>

@@ -39,6 +39,7 @@ def log_row_result(
     response_body: dict[str, Any],
     success: bool,
     error_message: Optional[str] = None,
+    action: str = "create",
 ) -> None:
     sb = _get_client()
     sb.table("import_results").insert({
@@ -49,6 +50,7 @@ def log_row_result(
         "response": response_body,
         "success": success,
         "error": error_message,
+        "action": action,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }).execute()
 
@@ -58,27 +60,50 @@ def end_session(session_id: str) -> Optional[dict]:
 
     # 결과 집계
     results = sb.table("import_results") \
-        .select("success, object_type") \
+        .select("success, object_type, row_index, action") \
         .eq("session_id", session_id) \
         .execute().data
 
     total = len(results)
-    success_count = sum(1 for r in results if r["success"])
-    failed_count = total - success_count
+
+    # (row_index, object_type) 그룹별로 최종 상태 결정
+    from collections import defaultdict
+    row_groups: dict[tuple, list] = defaultdict(list)
+    for r in results:
+        key = (r["row_index"], r["object_type"])
+        row_groups[key].append(r)
+
+    created_count = 0
+    updated_count = 0
+    failed_count = 0
 
     by_type: dict[str, dict] = {}
-    for r in results:
-        ot = r["object_type"]
-        if ot not in by_type:
-            by_type[ot] = {"success": 0, "failed": 0}
-        if r["success"]:
-            by_type[ot]["success"] += 1
+    for (_, obj_type), entries in row_groups.items():
+        if obj_type not in by_type:
+            by_type[obj_type] = {"created": 0, "updated": 0, "failed": 0}
+
+        has_update_success = any(
+            e.get("action") == "update" and e["success"] for e in entries
+        )
+        has_create_success = any(
+            e.get("action", "create") in (None, "create") and e["success"] for e in entries
+        )
+
+        if has_update_success:
+            updated_count += 1
+            by_type[obj_type]["updated"] += 1
+        elif has_create_success:
+            created_count += 1
+            by_type[obj_type]["created"] += 1
         else:
-            by_type[ot]["failed"] += 1
+            failed_count += 1
+            by_type[obj_type]["failed"] += 1
 
     summary = {
         "total_requests": total,
-        "success": success_count,
+        "success": created_count,
+        "created": created_count,
+        "updated": updated_count,
         "failed": failed_count,
         "by_type": by_type,
     }

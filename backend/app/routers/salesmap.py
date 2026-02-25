@@ -237,6 +237,88 @@ async def proxy_create_lead(
     )
 
 
+# --- 업데이트 프록시 엔드포인트 (중복 시 upsert용) ---
+
+@router.post("/proxy/v2/people/{record_id}")
+async def proxy_update_people(
+    record_id: str,
+    request: ProxyRequest,
+    x_salesmap_api_key: str = Header(..., alias="X-Salesmap-Api-Key"),
+    x_import_session_id: Optional[str] = Header(None, alias="X-Import-Session-Id"),
+    x_import_row_index: Optional[str] = Header(None, alias="X-Import-Row-Index"),
+) -> ProxyResponse:
+    return await _proxy_request(
+        endpoint=f"/v2/people/{record_id}",
+        method="POST",
+        api_key=x_salesmap_api_key,
+        data=request.data,
+        session_id=x_import_session_id,
+        row_index=int(x_import_row_index) if x_import_row_index else None,
+        object_type="people",
+        action="update",
+    )
+
+
+@router.post("/proxy/v2/organization/{record_id}")
+async def proxy_update_organization(
+    record_id: str,
+    request: ProxyRequest,
+    x_salesmap_api_key: str = Header(..., alias="X-Salesmap-Api-Key"),
+    x_import_session_id: Optional[str] = Header(None, alias="X-Import-Session-Id"),
+    x_import_row_index: Optional[str] = Header(None, alias="X-Import-Row-Index"),
+) -> ProxyResponse:
+    return await _proxy_request(
+        endpoint=f"/v2/organization/{record_id}",
+        method="POST",
+        api_key=x_salesmap_api_key,
+        data=request.data,
+        session_id=x_import_session_id,
+        row_index=int(x_import_row_index) if x_import_row_index else None,
+        object_type="organization",
+        action="update",
+    )
+
+
+@router.post("/proxy/v2/deal/{record_id}")
+async def proxy_update_deal(
+    record_id: str,
+    request: ProxyRequest,
+    x_salesmap_api_key: str = Header(..., alias="X-Salesmap-Api-Key"),
+    x_import_session_id: Optional[str] = Header(None, alias="X-Import-Session-Id"),
+    x_import_row_index: Optional[str] = Header(None, alias="X-Import-Row-Index"),
+) -> ProxyResponse:
+    return await _proxy_request(
+        endpoint=f"/v2/deal/{record_id}",
+        method="POST",
+        api_key=x_salesmap_api_key,
+        data=request.data,
+        session_id=x_import_session_id,
+        row_index=int(x_import_row_index) if x_import_row_index else None,
+        object_type="deal",
+        action="update",
+    )
+
+
+@router.post("/proxy/v2/lead/{record_id}")
+async def proxy_update_lead(
+    record_id: str,
+    request: ProxyRequest,
+    x_salesmap_api_key: str = Header(..., alias="X-Salesmap-Api-Key"),
+    x_import_session_id: Optional[str] = Header(None, alias="X-Import-Session-Id"),
+    x_import_row_index: Optional[str] = Header(None, alias="X-Import-Row-Index"),
+) -> ProxyResponse:
+    return await _proxy_request(
+        endpoint=f"/v2/lead/{record_id}",
+        method="POST",
+        api_key=x_salesmap_api_key,
+        data=request.data,
+        session_id=x_import_session_id,
+        row_index=int(x_import_row_index) if x_import_row_index else None,
+        object_type="lead",
+        action="update",
+    )
+
+
 async def _proxy_request(
     endpoint: str,
     method: str,
@@ -245,6 +327,7 @@ async def _proxy_request(
     session_id: Optional[str] = None,
     row_index: Optional[int] = None,
     object_type: Optional[str] = None,
+    action: str = "create",
 ) -> ProxyResponse:
     """
     세일즈맵 API로 요청 프록시 (+ 세션 로깅)
@@ -285,6 +368,7 @@ async def _proxy_request(
             else:
                 proxy_resp = ProxyResponse(
                     success=False,
+                    data=result.get("data"),
                     message=result.get("message", f"API 오류: {response.status_code}"),
                     reason=reason_str,
                 )
@@ -300,6 +384,7 @@ async def _proxy_request(
                         response_body=result,
                         success=proxy_resp.success,
                         error_message=proxy_resp.reason or proxy_resp.message if not proxy_resp.success else None,
+                        action=action,
                     )
                 except Exception as log_err:
                     print(f"[Salesmap Proxy] Logging error (non-fatal): {log_err}")
@@ -309,14 +394,14 @@ async def _proxy_request(
     except httpx.TimeoutException:
         if session_id and row_index is not None and object_type:
             try:
-                log_row_result(session_id, row_index, object_type, data, {}, False, "API 서버 응답 시간 초과")
+                log_row_result(session_id, row_index, object_type, data, {}, False, "API 서버 응답 시간 초과", action=action)
             except Exception:
                 pass
         return ProxyResponse(success=False, message="API 서버 응답 시간 초과")
     except Exception as e:
         if session_id and row_index is not None and object_type:
             try:
-                log_row_result(session_id, row_index, object_type, data, {}, False, str(e))
+                log_row_result(session_id, row_index, object_type, data, {}, False, str(e), action=action)
             except Exception:
                 pass
         return ProxyResponse(success=False, message=str(e))

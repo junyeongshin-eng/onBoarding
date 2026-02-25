@@ -685,8 +685,10 @@ export interface AdminSession {
   summary: {
     total_requests: number;
     success: number;
+    created?: number;
+    updated?: number;
     failed: number;
-    by_type: Record<string, { success: number; failed: number }>;
+    by_type: Record<string, { created?: number; updated?: number; failed: number; success?: number }>;
   } | null;
 }
 
@@ -697,6 +699,7 @@ export interface AdminRowResult {
   response: Record<string, unknown>;
   success: boolean;
   error: string | null;
+  action?: string;
   timestamp: string;
 }
 

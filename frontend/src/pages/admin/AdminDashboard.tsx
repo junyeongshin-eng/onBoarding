@@ -26,6 +26,31 @@ function duration(start: string, end: string | null) {
   return `${Math.floor(sec / 60)}분 ${sec % 60}초`;
 }
 
+/** 결과 라벨 및 색상 결정 */
+function getResultLabel(r: AdminRowResult): { label: string; color: string; bgColor: string } {
+  if (r.success && r.action === 'update') {
+    return { label: '업데이트', color: 'text-[#3b82f6]', bgColor: '' };
+  }
+  if (r.success) {
+    return { label: '생성', color: 'text-[#22c55e]', bgColor: '' };
+  }
+  // 실패: action=create이고 중복 에러면 "중복 감지"
+  if (!r.success && r.action !== 'update' && r.error?.includes('중복')) {
+    return { label: '중복 감지', color: 'text-[#f59e0b]', bgColor: 'bg-[#fffbeb]' };
+  }
+  return { label: '실패', color: 'text-[#ef4444]', bgColor: 'bg-[#fef2f2]' };
+}
+
+/** summary에서 created/updated/failed 안전하게 가져오기 (이전 데이터 호환) */
+function getSummaryCounts(summary: AdminSession['summary']) {
+  if (!summary) return { created: 0, updated: 0, failed: 0 };
+  return {
+    created: summary.created ?? summary.success ?? 0,
+    updated: summary.updated ?? 0,
+    failed: summary.failed ?? 0,
+  };
+}
+
 interface Props {
   password: string;
   onLogout: () => void;
@@ -78,6 +103,8 @@ export function AdminDashboard({ password, onLogout }: Props) {
 
   // Detail view
   if (selectedDetail) {
+    const counts = getSummaryCounts(selectedDetail.summary);
+
     return (
       <div className="flex h-screen w-screen flex-col bg-[#F2F3F0]">
         {/* Header */}
@@ -112,15 +139,24 @@ export function AdminDashboard({ password, onLogout }: Props) {
           </div>
           {selectedDetail.summary && (
             <>
-              <div className="flex items-center gap-2 rounded-lg border border-[#22c55e]/30 bg-[#f0fdf4] px-4 py-3">
-                <span className="material-symbols-rounded text-[#22c55e]" style={{ fontSize: 18 }}>check_circle</span>
-                <span className="font-primary text-sm font-semibold text-[#22c55e]">{selectedDetail.summary.success}</span>
-                <span className="font-secondary text-sm text-[#666666]">성공</span>
-              </div>
-              {selectedDetail.summary.failed > 0 && (
+              {counts.created > 0 && (
+                <div className="flex items-center gap-2 rounded-lg border border-[#22c55e]/30 bg-[#f0fdf4] px-4 py-3">
+                  <span className="material-symbols-rounded text-[#22c55e]" style={{ fontSize: 18 }}>check_circle</span>
+                  <span className="font-primary text-sm font-semibold text-[#22c55e]">{counts.created}</span>
+                  <span className="font-secondary text-sm text-[#666666]">생성</span>
+                </div>
+              )}
+              {counts.updated > 0 && (
+                <div className="flex items-center gap-2 rounded-lg border border-[#3b82f6]/30 bg-[#eff6ff] px-4 py-3">
+                  <span className="material-symbols-rounded text-[#3b82f6]" style={{ fontSize: 18 }}>sync</span>
+                  <span className="font-primary text-sm font-semibold text-[#3b82f6]">{counts.updated}</span>
+                  <span className="font-secondary text-sm text-[#666666]">업데이트</span>
+                </div>
+              )}
+              {counts.failed > 0 && (
                 <div className="flex items-center gap-2 rounded-lg border border-[#ef4444]/30 bg-[#fef2f2] px-4 py-3">
                   <span className="material-symbols-rounded text-[#ef4444]" style={{ fontSize: 18 }}>cancel</span>
-                  <span className="font-primary text-sm font-semibold text-[#ef4444]">{selectedDetail.summary.failed}</span>
+                  <span className="font-primary text-sm font-semibold text-[#ef4444]">{counts.failed}</span>
                   <span className="font-secondary text-sm text-[#666666]">실패</span>
                 </div>
               )}
@@ -149,48 +185,49 @@ export function AdminDashboard({ password, onLogout }: Props) {
             <span className="font-primary text-xs font-semibold text-[#666666]">에러</span>
           </div>
           <div className="flex-1 overflow-auto">
-            {selectedDetail.results.map((r: AdminRowResult, idx: number) => (
-              <div key={idx}>
-                <div
-                  onClick={() => toggleRow(idx)}
-                  className={`grid grid-cols-[60px_80px_80px_80px_1fr] items-center px-4 py-2.5 cursor-pointer border-b border-[#CBCCC9]/50 hover:bg-[#F2F3F0] ${
-                    !r.success ? 'bg-[#fef2f2]' : ''
-                  }`}
-                >
-                  <span className="font-secondary text-sm text-[#111111]">{r.row_index + 1}</span>
-                  <span className="font-secondary text-xs text-[#666666]">{OBJ_NAMES[r.object_type] || r.object_type}</span>
-                  <span className={`font-primary text-xs font-medium ${r.success ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
-                    {r.success ? '성공' : '실패'}
-                  </span>
-                  <span className="font-secondary text-xs text-[#666666]">
-                    {new Date(r.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                  </span>
-                  <div className="flex items-center justify-between">
-                    <span className="font-secondary text-xs text-[#ef4444] truncate">{r.error || ''}</span>
-                    <span className="material-symbols-rounded text-[#666666]" style={{ fontSize: 16 }}>
-                      {expandedRows.has(idx) ? 'expand_less' : 'expand_more'}
+            {selectedDetail.results.map((r: AdminRowResult, idx: number) => {
+              const resultInfo = getResultLabel(r);
+              return (
+                <div key={idx}>
+                  <div
+                    onClick={() => toggleRow(idx)}
+                    className={`grid grid-cols-[60px_80px_80px_80px_1fr] items-center px-4 py-2.5 cursor-pointer border-b border-[#CBCCC9]/50 hover:bg-[#F2F3F0] ${resultInfo.bgColor}`}
+                  >
+                    <span className="font-secondary text-sm text-[#111111]">{r.row_index + 1}</span>
+                    <span className="font-secondary text-xs text-[#666666]">{OBJ_NAMES[r.object_type] || r.object_type}</span>
+                    <span className={`font-primary text-xs font-medium ${resultInfo.color}`}>
+                      {resultInfo.label}
                     </span>
+                    <span className="font-secondary text-xs text-[#666666]">
+                      {new Date(r.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="font-secondary text-xs text-[#ef4444] truncate">{r.error || ''}</span>
+                      <span className="material-symbols-rounded text-[#666666]" style={{ fontSize: 16 }}>
+                        {expandedRows.has(idx) ? 'expand_less' : 'expand_more'}
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                {expandedRows.has(idx) && (
-                  <div className="grid grid-cols-2 gap-4 border-b border-[#CBCCC9] bg-[#F2F3F0] p-4">
-                    <div className="flex flex-col gap-1">
-                      <span className="font-primary text-xs font-semibold text-[#FF8400]">Request</span>
-                      <pre className="max-h-48 overflow-auto rounded border border-[#CBCCC9] bg-white p-3 font-mono text-xs text-[#111111]">
-                        {JSON.stringify(r.request, null, 2)}
-                      </pre>
+                  {expandedRows.has(idx) && (
+                    <div className="grid grid-cols-2 gap-4 border-b border-[#CBCCC9] bg-[#F2F3F0] p-4">
+                      <div className="flex flex-col gap-1">
+                        <span className="font-primary text-xs font-semibold text-[#FF8400]">Request</span>
+                        <pre className="max-h-48 overflow-auto rounded border border-[#CBCCC9] bg-white p-3 font-mono text-xs text-[#111111]">
+                          {JSON.stringify(r.request, null, 2)}
+                        </pre>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="font-primary text-xs font-semibold text-[#FF8400]">Response</span>
+                        <pre className="max-h-48 overflow-auto rounded border border-[#CBCCC9] bg-white p-3 font-mono text-xs text-[#111111]">
+                          {JSON.stringify(r.response, null, 2)}
+                        </pre>
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="font-primary text-xs font-semibold text-[#FF8400]">Response</span>
-                      <pre className="max-h-48 overflow-auto rounded border border-[#CBCCC9] bg-white p-3 font-mono text-xs text-[#111111]">
-                        {JSON.stringify(r.response, null, 2)}
-                      </pre>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              );
+            })}
             {selectedDetail.results.length === 0 && (
               <div className="flex items-center justify-center py-12">
                 <span className="font-secondary text-sm text-[#666666]">기록된 요청이 없습니다</span>
@@ -249,60 +286,71 @@ export function AdminDashboard({ password, onLogout }: Props) {
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            {sessions.map((s: AdminSession) => (
-              <div
-                key={s.id}
-                onClick={() => openDetail(s.id)}
-                className="flex items-center gap-4 rounded-lg border border-[#CBCCC9] bg-white px-5 py-4 cursor-pointer hover:border-[#FF8400] transition-colors"
-              >
-                {/* Status icon */}
-                <span
-                  className={`material-symbols-rounded ${
-                    s.status === 'completed' ? 'text-[#22c55e]' : 'text-[#f59e0b]'
-                  }`}
-                  style={{ fontSize: 24 }}
+            {sessions.map((s: AdminSession) => {
+              const counts = getSummaryCounts(s.summary);
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => openDetail(s.id)}
+                  className="flex items-center gap-4 rounded-lg border border-[#CBCCC9] bg-white px-5 py-4 cursor-pointer hover:border-[#FF8400] transition-colors"
                 >
-                  {s.status === 'completed' ? 'check_circle' : 'pending'}
-                </span>
-
-                {/* File info */}
-                <div className="flex flex-1 flex-col gap-1 min-w-0">
-                  <span className="font-primary text-sm font-medium text-[#111111] truncate">
-                    {s.filename}
+                  {/* Status icon */}
+                  <span
+                    className={`material-symbols-rounded ${
+                      s.status === 'completed' ? 'text-[#22c55e]' : 'text-[#f59e0b]'
+                    }`}
+                    style={{ fontSize: 24 }}
+                  >
+                    {s.status === 'completed' ? 'check_circle' : 'pending'}
                   </span>
-                  <span className="font-secondary text-xs text-[#666666]">
-                    {formatDate(s.started_at)} | {s.total_rows}행 | {duration(s.started_at, s.ended_at)}
-                  </span>
-                </div>
 
-                {/* Object type tags */}
-                <div className="flex items-center gap-1.5">
-                  {s.object_types.map(ot => (
-                    <span key={ot} className="rounded-full bg-[#FF8400]/15 px-2.5 py-1 font-primary text-xs font-medium text-[#FF8400]">
-                      {OBJ_NAMES[ot] || ot}
+                  {/* File info */}
+                  <div className="flex flex-1 flex-col gap-1 min-w-0">
+                    <span className="font-primary text-sm font-medium text-[#111111] truncate">
+                      {s.filename}
                     </span>
-                  ))}
-                </div>
-
-                {/* Results summary */}
-                {s.summary && (
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1">
-                      <span className="material-symbols-rounded text-[#22c55e]" style={{ fontSize: 16 }}>check_circle</span>
-                      <span className="font-primary text-sm font-semibold text-[#22c55e]">{s.summary.success}</span>
-                    </div>
-                    {s.summary.failed > 0 && (
-                      <div className="flex items-center gap-1">
-                        <span className="material-symbols-rounded text-[#ef4444]" style={{ fontSize: 16 }}>cancel</span>
-                        <span className="font-primary text-sm font-semibold text-[#ef4444]">{s.summary.failed}</span>
-                      </div>
-                    )}
+                    <span className="font-secondary text-xs text-[#666666]">
+                      {formatDate(s.started_at)} | {s.total_rows}행 | {duration(s.started_at, s.ended_at)}
+                    </span>
                   </div>
-                )}
 
-                <span className="material-symbols-rounded text-[#CBCCC9]" style={{ fontSize: 20 }}>chevron_right</span>
-              </div>
-            ))}
+                  {/* Object type tags */}
+                  <div className="flex items-center gap-1.5">
+                    {s.object_types.map(ot => (
+                      <span key={ot} className="rounded-full bg-[#FF8400]/15 px-2.5 py-1 font-primary text-xs font-medium text-[#FF8400]">
+                        {OBJ_NAMES[ot] || ot}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Results summary */}
+                  {s.summary && (
+                    <div className="flex items-center gap-3">
+                      {counts.created > 0 && (
+                        <div className="flex items-center gap-1">
+                          <span className="material-symbols-rounded text-[#22c55e]" style={{ fontSize: 16 }}>check_circle</span>
+                          <span className="font-primary text-sm font-semibold text-[#22c55e]">{counts.created}</span>
+                        </div>
+                      )}
+                      {counts.updated > 0 && (
+                        <div className="flex items-center gap-1">
+                          <span className="material-symbols-rounded text-[#3b82f6]" style={{ fontSize: 16 }}>sync</span>
+                          <span className="font-primary text-sm font-semibold text-[#3b82f6]">{counts.updated}</span>
+                        </div>
+                      )}
+                      {counts.failed > 0 && (
+                        <div className="flex items-center gap-1">
+                          <span className="material-symbols-rounded text-[#ef4444]" style={{ fontSize: 16 }}>cancel</span>
+                          <span className="font-primary text-sm font-semibold text-[#ef4444]">{counts.failed}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <span className="material-symbols-rounded text-[#CBCCC9]" style={{ fontSize: 20 }}>chevron_right</span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
