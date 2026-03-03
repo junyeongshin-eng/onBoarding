@@ -102,24 +102,14 @@ async def fetch_fields(request: FetchFieldsRequest) -> FetchFieldsResponse:
     try:
         results = []
 
-        # organization -> company 매핑 (salesmap_service는 company 사용)
-        object_type_map = {
-            "organization": "company",
-        }
-
         for obj_type in request.object_types:
-            # 서비스에서 사용하는 object_type으로 변환
-            service_obj_type = object_type_map.get(obj_type, obj_type)
+            print(f"[fetch-fields] Fetching fields for: {obj_type}")
 
-            print(f"[fetch-fields] Fetching fields for: {obj_type} (service: {service_obj_type})")
-
-            # salesmap_service의 fetch_object_fields 사용
-            result = await fetch_object_fields(request.api_key, service_obj_type)
+            result = await fetch_object_fields(request.api_key, obj_type)
 
             print(f"[fetch-fields] {obj_type} result: success={result.get('success')}, fields={len(result.get('fields', []))}")
 
-            # 결과 변환
-            object_name = OBJECT_NAMES_KR.get(service_obj_type, obj_type)
+            object_name = OBJECT_NAMES_KR.get(obj_type, obj_type)
 
             results.append(ObjectFieldsResult(
                 object_type=obj_type,  # 원래 요청한 object_type 유지

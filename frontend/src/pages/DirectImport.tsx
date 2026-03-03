@@ -290,6 +290,21 @@ export function DirectImport() {
           console.log('Parsed fields:', newFields);
           setSalesmapFields(newFields);
 
+          // 기본 매핑: 이메일/전화 컬럼 → 고객(people) 필드
+          if (uploadedFile?.columns) {
+            const hasEmail = newFields.people.some((f: { id: string }) => f.id === '이메일');
+            const hasPhone = newFields.people.some((f: { id: string }) => f.id === '전화');
+
+            for (const col of uploadedFile.columns) {
+              if (hasEmail && (col.includes('이메일') || col.toLowerCase().includes('email'))) {
+                handleMappingChange('people', col, '이메일');
+              }
+              if (hasPhone && (col.includes('전화') || col.toLowerCase().includes('phone'))) {
+                handleMappingChange('people', col, '전화');
+              }
+            }
+          }
+
           // 파이프라인 목록 + 사용자 목록 조회
           try {
             const [dealPipelineData, leadPipelineData, usersData] = await Promise.all([
@@ -475,7 +490,7 @@ export function DirectImport() {
       // 기본 필드 (top-level)
       const body: Record<string, unknown> = {};
       // 커스텀 필드 (fieldList)
-      const fieldList: Array<{ name: string; stringValue?: string; numberValue?: number; booleanValue?: boolean; dateValue?: string; userValueId?: string }> = [];
+      const fieldList: Array<{ name: string; stringValue?: string; stringValueList?: string[]; numberValue?: number; booleanValue?: boolean; dateValue?: string; userValueId?: string; userValueIdList?: string[]; peopleValueIdList?: string[] }> = [];
 
       // 이름(name) 필드 키 찾기 - "이름" 또는 "name"
       const nameFieldKey = fields.find(f => f.key === '이름' || f.key === 'name')?.key || '이름';
@@ -555,14 +570,28 @@ export function DirectImport() {
             continue;
           }
 
-          // 담당자 필드: 이름→userValueId 변환
-          if (fieldKey === '담당자') {
+          // 사용자(단일) 필드: 이름→userValueId 변환
+          if (fieldDef.type === 'user') {
             const userName = String(value).trim();
             const matchedUser = salesmapUsers.find(u => u.name.trim() === userName);
             if (matchedUser) {
               fieldList.push({ name: fieldKey, userValueId: matchedUser.id });
             } else {
-              console.warn(`[buildBody] ${objectType} - 담당자 "${userName}" 매칭 실패, 건너뜀`);
+              console.warn(`[buildBody] ${objectType} - user "${fieldKey}" value "${userName}" 매칭 실패`);
+            }
+            continue;
+          }
+
+          // 사용자(복수) 필드: 이름→userValueIdList 변환
+          if (fieldDef.type === 'multiUser') {
+            const userNames = String(value).split(',').map(n => n.trim()).filter(Boolean);
+            const userIds: string[] = [];
+            for (const userName of userNames) {
+              const matched = salesmapUsers.find(u => u.name.trim() === userName);
+              if (matched) userIds.push(matched.id);
+            }
+            if (userIds.length > 0) {
+              fieldList.push({ name: fieldKey, userValueIdList: userIds });
             }
             continue;
           }
@@ -572,7 +601,7 @@ export function DirectImport() {
             || /날짜|date/i.test(fieldKey) || /날짜|date/i.test(fieldDef.name);
           const isDateLikeValue = /^\d{4}[-./]\d{1,2}[-./]\d{1,2}(T\d{2}:\d{2}(:\d{2})?)?/.test(String(value).trim());
 
-          // 타입에 따른 처리
+          // 타입별 처리
           if (fieldDef.type === 'number') {
             const numValue = Number(String(value).replace(/,/g, ''));
             fieldList.push({ name: fieldKey, numberValue: numValue });
@@ -580,18 +609,28 @@ export function DirectImport() {
             const boolValue = value === true || value === 'true' || value === 'Y' || value === '예';
             fieldList.push({ name: fieldKey, booleanValue: boolValue });
           } else if (isDateField || isDateLikeValue) {
-            // 날짜 문자열을 YYYY-MM-DD 또는 ISO 형식으로 변환
             const raw = String(value).trim();
-            const normalized = raw.replace(/[./]/g, '-'); // 2026.02.12 → 2026-02-12
+            const normalized = raw.replace(/[./]/g, '-');
             const parsed = new Date(normalized);
             if (!isNaN(parsed.getTime())) {
-              const dateValue = parsed.toISOString().split('T')[0]; // YYYY-MM-DD
+              // datetime → ISO 전체, date → YYYY-MM-DD
+              const dateValue = fieldDef.type === 'datetime'
+                ? parsed.toISOString()
+                : parsed.toISOString().split('T')[0];
               fieldList.push({ name: fieldKey, dateValue });
             } else {
               fieldList.push({ name: fieldKey, dateValue: raw });
             }
+          } else if (fieldDef.type === 'multiSelect') {
+            // 복수 선택: 쉼표 구분 → stringValueList
+            const values = String(value).split(',').map(v => v.trim()).filter(Boolean);
+            fieldList.push({ name: fieldKey, stringValueList: values });
+          } else if (fieldDef.type === 'multiPeople') {
+            // 고객 복수: 쉼표 구분 UUID → peopleValueIdList
+            const ids = String(value).split(',').map(v => v.trim()).filter(Boolean);
+            fieldList.push({ name: fieldKey, peopleValueIdList: ids });
           } else {
-            // 텍스트, 이메일, 전화 등 모든 문자열 타입
+            // 텍스트, 단일 선택 등 → stringValue
             fieldList.push({ name: fieldKey, stringValue: String(value) });
           }
         }

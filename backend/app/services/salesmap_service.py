@@ -74,29 +74,28 @@ async def validate_api_key(api_key: str) -> dict:
 
 async def fetch_object_fields(api_key: str, object_type: str) -> dict:
     """
-    Fetch available fields for an object type by calling the list API
-    and extracting field names from the response.
+    GET /v2/field/{type} API로 필드 목록 조회.
 
     Args:
         api_key: Salesmap API key
-        object_type: One of 'people', 'deal', 'lead', 'company'
+        object_type: One of 'people', 'deal', 'lead', 'organization', 'company'
 
     Returns:
         Dictionary with fields list and metadata
     """
-    endpoint = SALESMAP_ENDPOINTS.get(object_type)
-    if not endpoint:
-        return {
-            "success": False,
-            "error": f"알 수 없는 오브젝트 타입: {object_type}",
-            "fields": []
-        }
+    # Handle legacy "company" mapping → field API uses "organization"
+    field_api_type = "organization" if object_type == "company" else object_type
+
+    # API type → frontend type 매핑
+    TYPE_MAP = {
+        "string": "text",
+        "dateTime": "datetime",
+    }
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            url = f"{SALESMAP_BASE_URL}/{endpoint}"
+            url = f"{SALESMAP_BASE_URL}/field/{field_api_type}"
             print(f"[fetch_object_fields] 요청 URL: {url}")
-            print(f"[fetch_object_fields] Object Type: {object_type}")
 
             response = await client.get(
                 url,
@@ -107,91 +106,76 @@ async def fetch_object_fields(api_key: str, object_type: str) -> dict:
             )
 
             print(f"[fetch_object_fields] 응답 상태: {response.status_code}")
-            print(f"[fetch_object_fields] 응답 내용: {response.text[:1000]}" if len(response.text) > 1000 else f"[fetch_object_fields] 응답 내용: {response.text}")
 
             if response.status_code == 401:
-                return {
-                    "success": False,
-                    "error": "API 키가 유효하지 않습니다",
-                    "fields": []
-                }
+                return {"success": False, "error": "API 키가 유효하지 않습니다", "fields": []}
 
             if response.status_code != 200:
-                return {
-                    "success": False,
-                    "error": f"API 오류: {response.status_code}",
-                    "fields": []
-                }
+                return {"success": False, "error": f"API 오류: {response.status_code}", "fields": []}
 
             data = response.json()
 
-            # API 응답 구조: {"success": true, "data": {"peopleList": [...], "dealList": [...], ...}}
-            # endpoint에 따라 다른 키 사용
-            list_key_map = {
-                "people": "peopleList",
-                "deal": "dealList",
-                "lead": "leadList",
-                "organization": "organizationList",
-            }
-            list_key = list_key_map.get(endpoint, f"{endpoint}List")
+            raw_fields = data.get("data", {}).get("fieldList", [])
 
-            inner_data = data.get("data", {})
-            records = inner_data.get(list_key, [])
+            print(f"[fetch_object_fields] {field_api_type} 필드 수: {len(raw_fields)}")
 
-            print(f"[fetch_object_fields] List Key: {list_key}, Records 수: {len(records)}")
-
-            if not records:
-                # No records found, return basic fields
-                return {
-                    "success": True,
-                    "warning": "데이터가 없어 기본 필드만 표시됩니다",
-                    "fields": get_default_fields(object_type),
-                    "record_count": 0
-                }
-
-            # Extract all unique field names from records
-            all_fields = set()
-            for record in records:
-                if isinstance(record, dict):
-                    all_fields.update(record.keys())
-
-            # Convert to list of field objects with metadata
             fields = []
-            for field_name in sorted(all_fields):
-                # Skip internal/system fields
-                if field_name.startswith("_"):
+
+            # "이름" 필드는 top-level이라 dataFieldList에 없을 수 있음 → 수동 추가
+            has_name_field = any(f.get("name") in ("이름", "name") for f in raw_fields)
+            if not has_name_field:
+                fields.append({
+                    "id": "이름",
+                    "label": "이름",
+                    "type": "text",
+                    "required": True,
+                    "is_system": False,
+                    "editable": True,
+                })
+
+            # CSV import 불가 타입 (관계형, 파일, 시퀀스, 웹폼 등)
+            SKIP_TYPES = {
+                "multiAttachment", "multiPeopleGroup",
+                "multiTeam", "multiWebForm", "multiSequence",
+                "webForm", "sequence",
+            }
+
+            for f in raw_fields:
+                field_name = f.get("name", "")
+                field_type = f.get("type", "string")
+
+                # 시스템 필드 제외
+                if is_system_field(field_name):
                     continue
 
-                is_sys = is_system_field(field_name)
-                field_info = {
+                # CSV import 불가 타입 제외
+                if field_type in SKIP_TYPES:
+                    continue
+
+                mapped_type = TYPE_MAP.get(field_type, field_type)
+
+                # Import에서는 "이름"만 필수 (다른 필드는 API 기본값 있음)
+                required = field_name in ("이름", "name")
+
+                fields.append({
                     "id": field_name,
-                    "label": get_field_label(field_name),
-                    "type": infer_field_type(records, field_name),
-                    "required": is_required_field(object_type, field_name),
-                    "is_system": is_sys,
-                    "editable": not is_sys,  # 시스템 필드가 아니면 수정 가능
-                }
-                fields.append(field_info)
+                    "label": field_name,
+                    "type": mapped_type,
+                    "required": required,
+                    "is_system": False,
+                    "editable": True,
+                })
 
             return {
                 "success": True,
                 "fields": fields,
-                "record_count": len(records),
-                "object_name": OBJECT_NAMES_KR.get(object_type, object_type)
+                "object_name": OBJECT_NAMES_KR.get(object_type, object_type),
             }
 
     except httpx.TimeoutException:
-        return {
-            "success": False,
-            "error": "API 서버 연결 시간 초과",
-            "fields": []
-        }
+        return {"success": False, "error": "API 서버 연결 시간 초과", "fields": []}
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"필드 조회 오류: {str(e)}",
-            "fields": []
-        }
+        return {"success": False, "error": f"필드 조회 오류: {str(e)}", "fields": []}
 
 
 def get_field_label(field_name: str) -> str:
