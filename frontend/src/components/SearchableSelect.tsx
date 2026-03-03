@@ -18,6 +18,7 @@ interface SearchableSelectProps {
   options: GroupedOption[];
   onChange: (value: string) => void;
   placeholder?: string;
+  selectedValues?: string[]; // 이미 선택된 값들 (멀티 매핑 시 체크 표시용)
 }
 
 export function SearchableSelect({
@@ -25,6 +26,7 @@ export function SearchableSelect({
   options,
   onChange,
   placeholder = '필드 선택',
+  selectedValues = [],
 }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -158,17 +160,19 @@ export function SearchableSelect({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex h-9 w-full items-center justify-between rounded-lg border px-3 text-left font-secondary text-sm transition-colors ${
-          value
-            ? 'border-[#FF8400] bg-[#FFF7ED] text-[#111111]'
-            : 'border-[#CBCCC9] bg-white text-[#666666] hover:border-[#999999]'
+        className={`flex items-center justify-between rounded-lg border px-3 text-left font-secondary text-sm transition-colors ${
+          selectedValues.length > 0
+            ? 'h-7 min-w-[80px] border-dashed border-[#CBCCC9] bg-white text-[#666666] hover:border-[#FF8400] hover:text-[#FF8400]'
+            : value
+            ? 'h-9 w-full border-[#FF8400] bg-[#FFF7ED] text-[#111111]'
+            : 'h-9 w-full border-[#CBCCC9] bg-white text-[#666666] hover:border-[#999999]'
         } focus:outline-none focus:border-[#FF8400]`}
       >
         <span className={`truncate ${value ? 'font-medium' : ''}`}>
-          {selectedLabel || placeholder}
+          {selectedValues.length > 0 ? placeholder : (selectedLabel || placeholder)}
         </span>
         <div className="flex items-center gap-1">
-          {value && (
+          {value && selectedValues.length === 0 && (
             <span
               onClick={handleClear}
               className="material-symbols-rounded text-[#666666] hover:text-[#111111] cursor-pointer"
@@ -244,6 +248,7 @@ export function SearchableSelect({
                       flatIndex++;
                       const optionValue = `${group.objectType}.${field.key}`;
                       const isSelected = value === optionValue;
+                      const isAlreadyMapped = selectedValues.includes(optionValue);
                       const isHighlighted = highlightedIndex === flatIndex;
 
                       return (
@@ -254,17 +259,24 @@ export function SearchableSelect({
                           className={`flex cursor-pointer items-center justify-between rounded-md px-3 py-2 ${
                             isSelected
                               ? 'bg-[#FF8400] text-white'
+                              : isAlreadyMapped
+                              ? 'bg-[#FFF7ED]'
                               : isHighlighted
                               ? 'bg-[#FFF7ED]'
                               : 'hover:bg-[#F2F3F0]'
                           }`}
                         >
-                          <span className={`font-secondary text-sm ${isSelected ? 'font-medium' : ''}`}>
-                            {field.name}
-                            {field.required && (
-                              <span className={`ml-1 ${isSelected ? 'text-white' : 'text-[#ef4444]'}`}>*</span>
+                          <div className="flex items-center gap-1.5">
+                            {isAlreadyMapped && (
+                              <span className="material-symbols-rounded text-[#22c55e]" style={{ fontSize: 16 }}>check</span>
                             )}
-                          </span>
+                            <span className={`font-secondary text-sm ${isSelected || isAlreadyMapped ? 'font-medium' : ''}`}>
+                              {field.name}
+                              {field.required && (
+                                <span className={`ml-1 ${isSelected ? 'text-white' : 'text-[#ef4444]'}`}>*</span>
+                              )}
+                            </span>
+                          </div>
                           {field.isCustom && (
                             <span
                               className={`rounded-full px-1.5 py-0.5 text-[10px] ${

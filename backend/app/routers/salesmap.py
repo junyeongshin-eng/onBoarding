@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.services.salesmap_service import (
     fetch_object_fields,
+    fetch_all_products,
     OBJECT_NAMES_KR,
 )
 from app.services.ai_service import get_openai_client
@@ -307,6 +308,52 @@ async def proxy_update_lead(
         object_type="lead",
         action="update",
     )
+
+
+@router.post("/proxy/v2/product")
+async def proxy_create_product(
+    request: ProxyRequest,
+    x_salesmap_api_key: str = Header(..., alias="X-Salesmap-Api-Key"),
+    x_import_session_id: Optional[str] = Header(None, alias="X-Import-Session-Id"),
+    x_import_row_index: Optional[str] = Header(None, alias="X-Import-Row-Index"),
+) -> ProxyResponse:
+    return await _proxy_request(
+        endpoint="/v2/product",
+        method="POST",
+        api_key=x_salesmap_api_key,
+        data=request.data,
+        session_id=x_import_session_id,
+        row_index=int(x_import_row_index) if x_import_row_index else None,
+        object_type="product",
+    )
+
+
+@router.post("/proxy/v2/quote")
+async def proxy_create_quote(
+    request: ProxyRequest,
+    x_salesmap_api_key: str = Header(..., alias="X-Salesmap-Api-Key"),
+    x_import_session_id: Optional[str] = Header(None, alias="X-Import-Session-Id"),
+    x_import_row_index: Optional[str] = Header(None, alias="X-Import-Row-Index"),
+) -> ProxyResponse:
+    return await _proxy_request(
+        endpoint="/v2/quote",
+        method="POST",
+        api_key=x_salesmap_api_key,
+        data=request.data,
+        session_id=x_import_session_id,
+        row_index=int(x_import_row_index) if x_import_row_index else None,
+        object_type="quote",
+    )
+
+
+# 전체 상품 조회 API
+@router.post("/products")
+async def get_products(request: ApiKeyValidationRequest) -> dict:
+    """
+    세일즈맵 전체 상품 목록 조회 (커서 페이지네이션)
+    """
+    result = await fetch_all_products(request.api_key)
+    return result
 
 
 async def _proxy_request(

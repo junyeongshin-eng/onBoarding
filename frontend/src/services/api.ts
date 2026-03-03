@@ -588,6 +588,37 @@ export async function fetchUsers(apiKey: string): Promise<FetchUsersResponse> {
   }
 }
 
+// 상품 조회
+export interface SalesmapProduct {
+  id: string;
+  name: string;
+  price: number;
+}
+
+export interface FetchProductsResponse {
+  success: boolean;
+  productList: SalesmapProduct[];
+  error?: string;
+}
+
+export async function fetchProducts(apiKey: string): Promise<FetchProductsResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/salesmap/products`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+
+    if (!response.ok) {
+      throw new Error('상품 목록 조회 실패');
+    }
+
+    return response.json();
+  } catch (e) {
+    return { success: false, productList: [], error: '상품 목록 조회 서버 연결 오류' };
+  }
+}
+
 // AI 필드 매칭 요청
 export interface FieldMatchRequest {
   error_columns: string[];

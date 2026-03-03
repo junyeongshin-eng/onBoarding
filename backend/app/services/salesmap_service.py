@@ -10,6 +10,8 @@ SALESMAP_ENDPOINTS = {
     "lead": "lead",
     "company": "organization",
     "organization": "organization",  # organization도 지원
+    "product": "product",
+    "quote": "quote",
 }
 
 # Korean names for objects
@@ -19,6 +21,8 @@ OBJECT_NAMES_KR = {
     "lead": "리드",
     "company": "회사",
     "organization": "회사",  # organization도 지원
+    "product": "상품",
+    "quote": "견적서",
 }
 
 
@@ -512,3 +516,73 @@ def get_default_fields(object_type: str) -> list:
     if object_type == "organization":
         return defaults.get("company", [])
     return defaults.get(object_type, [])
+
+
+async def fetch_all_products(api_key: str) -> dict:
+    """
+    GET /v2/product API로 전체 상품 목록 조회 (커서 페이지네이션).
+
+    Args:
+        api_key: Salesmap API key
+
+    Returns:
+        Dictionary with productList
+    """
+    all_products = []
+    cursor = None
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            while True:
+                url = f"{SALESMAP_BASE_URL}/product"
+                params = {"limit": 50}
+                if cursor:
+                    params["cursor"] = cursor
+
+                print(f"[fetch_all_products] 요청 URL: {url}, cursor: {cursor}")
+
+                response = await client.get(
+                    url,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {api_key}",
+                    },
+                    params=params,
+                )
+
+                print(f"[fetch_all_products] 응답 상태: {response.status_code}")
+
+                if response.status_code != 200:
+                    return {
+                        "success": False,
+                        "error": f"API 오류: {response.status_code}",
+                        "productList": all_products,
+                    }
+
+                data = response.json()
+                raw_list = data.get("data", {}).get("productList", [])
+
+                # 한국어 키 → 영문 키 정규화
+                for p in raw_list:
+                    all_products.append({
+                        "id": p.get("id", ""),
+                        "name": p.get("이름", p.get("name", "")),
+                        "price": p.get("금액", p.get("price", 0)),
+                    })
+
+                next_cursor = data.get("data", {}).get("nextCursor")
+                print(f"[fetch_all_products] 이번 페이지: {len(raw_list)}개, 누적: {len(all_products)}개, nextCursor: {next_cursor}")
+
+                if not next_cursor:
+                    break
+                cursor = next_cursor
+
+        return {
+            "success": True,
+            "productList": all_products,
+        }
+
+    except httpx.TimeoutException:
+        return {"success": False, "error": "API 서버 연결 시간 초과", "productList": all_products}
+    except Exception as e:
+        return {"success": False, "error": f"상품 조회 오류: {str(e)}", "productList": all_products}

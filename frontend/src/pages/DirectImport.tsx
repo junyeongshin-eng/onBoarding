@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
-import { uploadFile, validateSalesmapApiKey, fetchSalesmapFields, fetchPipelines, fetchUsers, salesmapAutoMapping, startImportSession, endImportSession } from '../services/api';
-import type { SalesmapUser } from '../services/api';
+import { uploadFile, validateSalesmapApiKey, fetchSalesmapFields, fetchPipelines, fetchUsers, fetchProducts, salesmapAutoMapping, startImportSession, endImportSession } from '../services/api';
+import type { SalesmapUser, SalesmapProduct } from '../services/api';
 import type { UploadResponse } from '../types';
 import { SearchableSelect, type GroupedOption } from '../components/SearchableSelect';
 
@@ -11,7 +11,7 @@ const STEPS = [
   { id: 'import', title: '가져오기', icon: 'cloud_upload' },
 ];
 
-type ObjectType = 'people' | 'organization' | 'deal' | 'lead';
+type ObjectType = 'people' | 'organization' | 'deal' | 'lead' | 'product' | 'quote';
 
 interface ObjectConfig {
   id: ObjectType;
@@ -25,6 +25,8 @@ const OBJECT_CONFIGS: ObjectConfig[] = [
   { id: 'organization', name: '회사', endpoint: '/v2/organization' },
   { id: 'deal', name: '딜', endpoint: '/v2/deal', needsConnection: true },
   { id: 'lead', name: '리드', endpoint: '/v2/lead', needsConnection: true },
+  { id: 'product', name: '상품', endpoint: '/v2/product' },
+  { id: 'quote', name: '견적서', endpoint: '/v2/quote', needsConnection: true },
 ];
 
 // 필드 매핑에서 제외할 시스템 필드 키워드 (백엔드 is_system 보완)
@@ -72,6 +74,9 @@ interface ObjectMappingState {
   pipelineId?: string;
   pipelineStageId?: string;
   defaultStatus?: string; // 딜 전용: 'In progress', 'Won', 'Lost'
+  // 견적서 전용
+  isMainQuote?: boolean;
+  quoteConnection?: 'deal' | 'lead';
 }
 
 export function DirectImport() {
@@ -89,11 +94,14 @@ export function DirectImport() {
   const [apiError, setApiError] = useState<string | null>(null);
 
   // Step 3: 필드 매핑
+  const [salesmapProducts, setSalesmapProducts] = useState<SalesmapProduct[]>([]);
   const [salesmapFields, setSalesmapFields] = useState<Record<ObjectType, SalesmapField[]>>({
     people: [],
     organization: [],
     deal: [],
     lead: [],
+    product: [],
+    quote: [],
   });
   const [isLoadingFields, setIsLoadingFields] = useState(false);
   const [objectMappings, setObjectMappings] = useState<Record<ObjectType, ObjectMappingState>>({
@@ -101,6 +109,8 @@ export function DirectImport() {
     organization: { enabled: false, columnMappings: {}, connectionField: 'people', connectionColumn: '' },
     deal: { enabled: false, columnMappings: {}, connectionField: 'people', connectionColumn: '', pipelineId: '', pipelineStageId: '', defaultStatus: 'In progress' },
     lead: { enabled: false, columnMappings: {}, connectionField: 'people', connectionColumn: '', pipelineId: '', pipelineStageId: '' },
+    product: { enabled: false, columnMappings: {}, connectionField: 'people', connectionColumn: '' },
+    quote: { enabled: false, columnMappings: {}, connectionField: 'people', connectionColumn: '', isMainQuote: true, quoteConnection: 'deal' },
   });
 
   // 자동매핑
@@ -123,17 +133,22 @@ export function DirectImport() {
     organization: 0,
     deal: 0,
     lead: 0,
+    product: 0,
+    quote: 0,
   });
   const [importResults, setImportResults] = useState<Record<ObjectType, {
     success: number;
     updated: number;
     failed: number;
+    skipped: number;
     errors: { row: number; message: string }[];
   } | null>>({
     people: null,
     organization: null,
     deal: null,
     lead: null,
+    product: null,
+    quote: null,
   });
 
   // 활성화된 오브젝트 타입들
@@ -159,8 +174,18 @@ export function DirectImport() {
 
     // deal/lead는 people 또는 organization이 반드시 활성화되어 있어야 함
     const config = OBJECT_CONFIGS.find(c => c.id === objectType);
-    if (config?.needsConnection) {
+    if (config?.needsConnection && objectType !== 'quote') {
       if (!objectMappings.people.enabled && !objectMappings.organization.enabled) {
+        return false;
+      }
+    }
+
+    // 견적서는 딜 또는 리드가 활성화되어야 하고, 상품도 활성화되어야 함
+    if (objectType === 'quote') {
+      if (!objectMappings.deal.enabled && !objectMappings.lead.enabled) {
+        return false;
+      }
+      if (!objectMappings.product.enabled) {
         return false;
       }
     }
@@ -209,7 +234,7 @@ export function DirectImport() {
         // 필드 조회
         setIsLoadingFields(true);
         try {
-          const fieldsResult = await fetchSalesmapFields(apiKey, ['people', 'organization', 'deal', 'lead']);
+          const fieldsResult = await fetchSalesmapFields(apiKey, ['people', 'organization', 'deal', 'lead', 'product', 'quote']);
           console.log('fieldsResult:', fieldsResult);
 
           const newFields: Record<ObjectType, SalesmapField[]> = {
@@ -217,6 +242,8 @@ export function DirectImport() {
             organization: [],
             deal: [],
             lead: [],
+            product: [],
+            quote: [],
           };
 
           // results 배열 형태 처리
@@ -238,6 +265,7 @@ export function DirectImport() {
                       const label = f.label || '';
                       return !STATUS_ONLY_FIELD_IDS.includes(id) && !STATUS_ONLY_FIELD_IDS.includes(label);
                     }
+                    // 견적서: 메인 견적서 여부도 매핑 가능 (토글은 기본값)
                     return true;
                   })
                   .map((f: any) => ({
@@ -248,15 +276,25 @@ export function DirectImport() {
                     required: f.required || false,
                     isCustom: f.is_custom || false,
                   }));
-                // 노트(메모) 필드 추가 - body.memo로 전달됨
-                parsedFields.push({
-                  id: '__memo__',
-                  key: '__memo__',
-                  name: '노트(메모)',
-                  type: 'text',
-                  required: false,
-                  isCustom: false,
-                });
+                // 노트(메모) 필드 추가 (상품/견적서는 메모 없음)
+                if (objType !== 'product' && objType !== 'quote') {
+                  parsedFields.push({
+                    id: '__memo__',
+                    key: '__memo__',
+                    name: '노트(메모)',
+                    type: 'text',
+                    required: false,
+                    isCustom: false,
+                  });
+                }
+                // 견적서 전용 가상 필드 추가
+                if (objType === 'quote') {
+                  parsedFields.push(
+                    { id: '__quoteAmount', key: '__quoteAmount', name: '수량', type: 'number', required: false, isCustom: false },
+                    { id: '__paymentCount', key: '__paymentCount', name: '결제횟수', type: 'number', required: false, isCustom: false },
+                    { id: '__paymentStartAt', key: '__paymentStartAt', name: '시작결제일', type: 'text', required: false, isCustom: false },
+                  );
+                }
                 newFields[objType] = parsedFields;
               }
             }
@@ -305,13 +343,20 @@ export function DirectImport() {
             }
           }
 
-          // 파이프라인 목록 + 사용자 목록 조회
+          // 파이프라인 목록 + 사용자 목록 + 상품 목록 조회
           try {
-            const [dealPipelineData, leadPipelineData, usersData] = await Promise.all([
+            const [dealPipelineData, leadPipelineData, usersData, productsData] = await Promise.all([
               fetchPipelines(apiKey, 'deal'),
               fetchPipelines(apiKey, 'lead'),
               fetchUsers(apiKey),
+              fetchProducts(apiKey),
             ]);
+
+            // 상품 목록
+            if (productsData.success && productsData.productList?.length > 0) {
+              setSalesmapProducts(productsData.productList);
+              console.log('Products loaded:', productsData.productList.length);
+            }
 
             // 사용자 목록
             if (usersData.success && usersData.userList?.length > 0) {
@@ -456,8 +501,8 @@ export function DirectImport() {
 
     const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
-    // 생성 순서 정의: organization → people → deal → lead
-    const creationOrder: ObjectType[] = ['organization', 'people', 'deal', 'lead'];
+    // 생성 순서 정의: organization → people → deal → lead → product → quote
+    const creationOrder: ObjectType[] = ['organization', 'people', 'deal', 'lead', 'product', 'quote'];
     const activeInOrder = creationOrder.filter(t => objectMappings[t].enabled);
 
     // 세션 시작 (로깅용, 실패해도 import 계속)
@@ -474,12 +519,17 @@ export function DirectImport() {
     }
 
     // 각 오브젝트별 결과 초기화
-    const resultsMap: Record<ObjectType, { success: number; updated: number; failed: number; errors: { row: number; message: string }[] }> = {
-      people: { success: 0, updated: 0, failed: 0, errors: [] },
-      organization: { success: 0, updated: 0, failed: 0, errors: [] },
-      deal: { success: 0, updated: 0, failed: 0, errors: [] },
-      lead: { success: 0, updated: 0, failed: 0, errors: [] },
+    const resultsMap: Record<ObjectType, { success: number; updated: number; failed: number; skipped: number; errors: { row: number; message: string }[] }> = {
+      people: { success: 0, updated: 0, failed: 0, skipped: 0, errors: [] },
+      organization: { success: 0, updated: 0, failed: 0, skipped: 0, errors: [] },
+      deal: { success: 0, updated: 0, failed: 0, skipped: 0, errors: [] },
+      lead: { success: 0, updated: 0, failed: 0, skipped: 0, errors: [] },
+      product: { success: 0, updated: 0, failed: 0, skipped: 0, errors: [] },
+      quote: { success: 0, updated: 0, failed: 0, skipped: 0, errors: [] },
     };
+
+    // 상품 캐시 (기존 + 새로 생성된 상품)
+    const productCache = [...salesmapProducts];
 
     // 헬퍼 함수: API 호출 및 body 생성
     // Salesmap API 형식: { name: "이름", fieldList: [{ name: "필드명", stringValue: "값" }] }
@@ -536,6 +586,28 @@ export function DirectImport() {
             console.log(`[buildBody] ${objectType} - memo value:`, value);
             body.memo = String(value);
             continue;
+          }
+
+          // 상품: 금액(price) 필드는 top-level로 설정
+          if (objectType === 'product' && (fieldKey === '금액' || fieldKey === 'price')) {
+            body.price = Number(String(value).replace(/,/g, ''));
+            continue;
+          }
+
+          // 견적서 전용 필드: 임시 키로 저장
+          if (objectType === 'quote') {
+            if (fieldKey === '__quoteAmount') {
+              body.__quoteAmount = Number(String(value).replace(/,/g, '')) || 1;
+              continue;
+            }
+            if (fieldKey === '__paymentCount') {
+              body.__paymentCount = Number(String(value).replace(/,/g, '')) || undefined;
+              continue;
+            }
+            if (fieldKey === '__paymentStartAt') {
+              body.__paymentStartAt = String(value);
+              continue;
+            }
           }
 
           // 딜: 상태(status) 필드는 top-level로 설정
@@ -707,6 +779,9 @@ export function DirectImport() {
       const row = fileData[i];
       let organizationId: string | null = null;
       let peopleId: string | null = null;
+      let dealId: string | null = null;
+      let leadId: string | null = null;
+      let productId: string | null = null;
 
       // 1. Organization 생성
       if (objectMappings.organization.enabled) {
@@ -825,12 +900,16 @@ export function DirectImport() {
           const result = await createObject('deal', body, i);
 
           if (result.success) {
+            dealId = result.data?.deal?.id || result.data?.id || null;
             if (result.wasUpdated) {
               resultsMap.deal.updated++;
             } else {
               resultsMap.deal.success++;
             }
           } else {
+            if (result.data?.id) {
+              dealId = result.data.id;
+            }
             resultsMap.deal.failed++;
             resultsMap.deal.errors.push({
               row: i + 1,
@@ -884,12 +963,16 @@ export function DirectImport() {
           const result = await createObject('lead', body, i);
 
           if (result.success) {
+            leadId = result.data?.lead?.id || result.data?.id || null;
             if (result.wasUpdated) {
               resultsMap.lead.updated++;
             } else {
               resultsMap.lead.success++;
             }
           } else {
+            if (result.data?.id) {
+              leadId = result.data.id;
+            }
             resultsMap.lead.failed++;
             resultsMap.lead.errors.push({
               row: i + 1,
@@ -901,6 +984,144 @@ export function DirectImport() {
           resultsMap.lead.errors.push({
             row: i + 1,
             message: error instanceof Error ? error.message : '리드 생성 요청 실패',
+          });
+        }
+      }
+
+      // 5. Product 생성/조회 (이름으로 캐시 검색)
+      if (objectMappings.product.enabled) {
+        try {
+          const body = buildBody(row, 'product');
+
+          if (body.name) {
+            // 캐시에서 이름으로 검색
+            const existingProduct = productCache.find(
+              p => p.name.trim().toLowerCase() === String(body.name).trim().toLowerCase()
+            );
+
+            if (existingProduct) {
+              // 기존 상품 사용
+              productId = existingProduct.id;
+              resultsMap.product.skipped++;
+              console.log(`[Product] 기존 상품 사용: ${existingProduct.name} (${existingProduct.id})`);
+            } else {
+              // 새 상품 생성
+              const result = await createObject('product', body, i);
+
+              if (result.success && result.data) {
+                productId = result.data.product?.id || result.data.id || null;
+                resultsMap.product.success++;
+                // 캐시에 추가 (중복 생성 방지)
+                if (productId) {
+                  productCache.push({
+                    id: productId,
+                    name: String(body.name),
+                    price: Number(body.price) || 0,
+                  });
+                }
+              } else {
+                resultsMap.product.failed++;
+                resultsMap.product.errors.push({
+                  row: i + 1,
+                  message: result.reason || result.message || '상품 생성 실패',
+                });
+              }
+            }
+          } else {
+            resultsMap.product.failed++;
+            resultsMap.product.errors.push({
+              row: i + 1,
+              message: '상품 이름이 비어 있습니다',
+            });
+          }
+        } catch (error) {
+          resultsMap.product.failed++;
+          resultsMap.product.errors.push({
+            row: i + 1,
+            message: error instanceof Error ? error.message : '상품 생성 요청 실패',
+          });
+        }
+      }
+
+      // 6. Quote 생성 (dealId/leadId + productId 필요)
+      if (objectMappings.quote.enabled) {
+        try {
+          // 연결 대상 결정 (사용자 설정 기반)
+          const quoteConn = objectMappings.quote.quoteConnection || 'deal';
+          const connId = quoteConn === 'deal' ? (dealId || leadId) : (leadId || dealId);
+          if (!connId) {
+            resultsMap.quote.failed++;
+            resultsMap.quote.errors.push({
+              row: i + 1,
+              message: '견적서 연결할 딜/리드가 없습니다',
+            });
+          } else if (!productId) {
+            resultsMap.quote.failed++;
+            resultsMap.quote.errors.push({
+              row: i + 1,
+              message: '견적서 연결할 상품이 없습니다',
+            });
+          } else {
+            const body = buildBody(row, 'quote');
+
+            // 딜/리드 연결 (선택한 대상만)
+            if (quoteConn === 'deal' && dealId) {
+              body.dealId = dealId;
+            } else if (quoteConn === 'lead' && leadId) {
+              body.leadId = leadId;
+            } else if (dealId) {
+              body.dealId = dealId;
+            } else if (leadId) {
+              body.leadId = leadId;
+            }
+
+            // 상품 정보 가져오기
+            const productInfo = productCache.find(p => p.id === productId);
+            const quoteAmount = body.__quoteAmount || 1;
+            const paymentCount = body.__paymentCount;
+            const paymentStartAt = body.__paymentStartAt;
+            delete body.__quoteAmount;
+            delete body.__paymentCount;
+            delete body.__paymentStartAt;
+
+            // quoteProductList 구성
+            const quoteProduct: Record<string, unknown> = {
+              name: productInfo?.name || '',
+              productId: productId,
+              price: productInfo?.price || 0,
+              amount: quoteAmount,
+            };
+            // 구독 상품 옵션 → quoteProductList 항목 안에 포함
+            if (paymentCount) quoteProduct.paymentCount = paymentCount;
+            if (paymentStartAt) quoteProduct.paymentStartAt = paymentStartAt;
+
+            body.quoteProductList = [quoteProduct];
+
+            // 메인 견적 여부: 매핑된 값 우선, 없으면 토글 기본값 사용
+            if (body['메인 견적서 여부'] !== undefined) {
+              body.isMainQuote = Boolean(body['메인 견적서 여부']);
+              delete body['메인 견적서 여부'];
+            } else {
+              body.isMainQuote = objectMappings.quote.isMainQuote !== false;
+            }
+
+            const result = await createObject('quote', body, i);
+
+            if (result.success) {
+              resultsMap.quote.success++;
+            } else {
+              resultsMap.quote.failed++;
+              resultsMap.quote.errors.push({
+                row: i + 1,
+                message: result.reason || result.message || '견적서 생성 실패',
+              });
+            }
+          }
+        } catch (error) {
+          resultsMap.quote.failed++;
+          resultsMap.quote.errors.push({
+            row: i + 1,
+            message: error instanceof Error ? error.message : '견적서 생성 요청 실패',
           });
         }
       }
@@ -1159,34 +1380,49 @@ export function DirectImport() {
         {currentStep === 2 && (
           <div className="flex flex-1 flex-col gap-4 overflow-hidden">
             {/* Object type checkboxes */}
-            <div className="flex items-center gap-3 rounded-lg border border-[#CBCCC9] bg-white px-4 py-3">
-              <span className="font-secondary text-sm text-[#666666]">업로드 대상:</span>
-              {OBJECT_CONFIGS.map(config => (
-                <label
-                  key={config.id}
-                  className={`flex items-center gap-2 rounded-full px-4 py-2 cursor-pointer transition-colors ${
-                    objectMappings[config.id].enabled
-                      ? 'bg-[#FF8400] text-[#111111]'
-                      : 'bg-[#F2F3F0] text-[#666666] hover:bg-[#E7E8E5]'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={objectMappings[config.id].enabled}
-                    onChange={() => toggleObjectEnabled(config.id)}
-                    className="sr-only"
-                  />
-                  <span className="material-symbols-rounded" style={{ fontSize: 18 }}>
-                    {objectMappings[config.id].enabled ? 'check_box' : 'check_box_outline_blank'}
-                  </span>
-                  <span className="font-primary text-sm font-medium">{config.name}</span>
-                  {!isObjectMappingValid(config.id) && objectMappings[config.id].enabled && (
-                    <span className="material-symbols-rounded text-[#f59e0b]" style={{ fontSize: 16 }}>
-                      warning
+            <div className="flex flex-col gap-2 rounded-lg border border-[#CBCCC9] bg-white px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className="font-secondary text-sm text-[#666666]">업로드 대상:</span>
+                {OBJECT_CONFIGS.map(config => (
+                  <label
+                    key={config.id}
+                    className={`flex items-center gap-2 rounded-full px-4 py-2 cursor-pointer transition-colors ${
+                      objectMappings[config.id].enabled
+                        ? 'bg-[#FF8400] text-[#111111]'
+                        : 'bg-[#F2F3F0] text-[#666666] hover:bg-[#E7E8E5]'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={objectMappings[config.id].enabled}
+                      onChange={() => toggleObjectEnabled(config.id)}
+                      className="sr-only"
+                    />
+                    <span className="material-symbols-rounded" style={{ fontSize: 18 }}>
+                      {objectMappings[config.id].enabled ? 'check_box' : 'check_box_outline_blank'}
                     </span>
-                  )}
-                </label>
-              ))}
+                    <span className="font-primary text-sm font-medium">{config.name}</span>
+                    {!isObjectMappingValid(config.id) && objectMappings[config.id].enabled && (
+                      <span className="material-symbols-rounded text-[#f59e0b]" style={{ fontSize: 16 }}>
+                        warning
+                      </span>
+                    )}
+                  </label>
+                ))}
+              </div>
+              {/* 연결 경고 (에러일 때만 인라인 표시) */}
+              {(objectMappings.deal.enabled || objectMappings.lead.enabled) &&
+                !objectMappings.people.enabled && !objectMappings.organization.enabled && (
+                <span className="font-secondary text-xs text-[#ef4444]">
+                  딜/리드는 고객 또는 회사가 필요합니다.
+                </span>
+              )}
+              {objectMappings.quote.enabled &&
+                (!objectMappings.deal.enabled && !objectMappings.lead.enabled || !objectMappings.product.enabled) && (
+                <span className="font-secondary text-xs text-[#ef4444]">
+                  견적서는 딜/리드와 상품이 모두 필요합니다.
+                </span>
+              )}
             </div>
 
             {enabledObjects.length === 0 ? (
@@ -1202,37 +1438,8 @@ export function DirectImport() {
               </div>
             ) : (
               <>
-                {/* Connection notice for deal/lead */}
-                {enabledObjects.some(c => c.needsConnection) && (
-                  <div className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${
-                    objectMappings.people.enabled || objectMappings.organization.enabled
-                      ? 'border-[#22c55e] bg-[#f0fdf4]'
-                      : 'border-[#ef4444] bg-[#fef2f2]'
-                  }`}>
-                    <span
-                      className={`material-symbols-rounded ${
-                        objectMappings.people.enabled || objectMappings.organization.enabled
-                          ? 'text-[#22c55e]'
-                          : 'text-[#ef4444]'
-                      }`}
-                      style={{ fontSize: 18 }}
-                    >
-                      {objectMappings.people.enabled || objectMappings.organization.enabled ? 'link' : 'error'}
-                    </span>
-                    {(objectMappings.people.enabled || objectMappings.organization.enabled) ? (
-                      <span className="font-secondary text-sm text-[#166534]">
-                        딜/리드 연결이 자동으로 설정됩니다: 회사 → 고객 → 딜/리드 순서로 생성되며, 생성된 ID가 자동 연결됩니다.
-                      </span>
-                    ) : (
-                      <span className="font-secondary text-sm text-[#991b1b]">
-                        딜/리드는 고객 또는 회사 연결이 필요합니다. 위에서 고객 또는 회사를 활성화해주세요.
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* 딜/리드 설정 (파이프라인, 상태) */}
-                {(objectMappings.deal.enabled || objectMappings.lead.enabled) && (
+                {/* 딜/리드/견적서 설정 (파이프라인, 상태, 견적 옵션) */}
+                {(objectMappings.deal.enabled || objectMappings.lead.enabled || objectMappings.quote.enabled) && (
                   <div className="flex flex-wrap gap-6 rounded-lg border border-[#CBCCC9] bg-white px-4 py-3">
                     {/* 딜 설정 */}
                     {objectMappings.deal.enabled && (
@@ -1346,13 +1553,52 @@ export function DirectImport() {
                         </div>
                       </div>
                     )}
+
+                    {/* 견적서 설정 */}
+                    {objectMappings.quote.enabled && (
+                      <div className="flex flex-col gap-2">
+                        <span className="font-primary text-sm font-semibold text-[#FF8400]">견적서 설정</span>
+                        <div className="flex flex-wrap items-center gap-3">
+                          {/* 연결 대상 */}
+                          <div className="flex items-center gap-2">
+                            <span className="font-secondary text-xs text-[#666666]">연결:</span>
+                            <select
+                              value={objectMappings.quote.quoteConnection || 'deal'}
+                              onChange={(e) => setObjectMappings(prev => ({
+                                ...prev,
+                                quote: { ...prev.quote, quoteConnection: e.target.value as 'deal' | 'lead' },
+                              }))}
+                              className="rounded border border-[#CBCCC9] bg-white px-2 py-1 font-secondary text-xs text-[#111111] focus:outline-none"
+                            >
+                              {objectMappings.deal.enabled && <option value="deal">딜</option>}
+                              {objectMappings.lead.enabled && <option value="lead">리드</option>}
+                            </select>
+                          </div>
+                          {/* 메인 견적 (기본값) */}
+                          <div className="flex items-center gap-2">
+                            <span className="font-secondary text-xs text-[#666666]">메인 견적 <span className="text-[#999999]">(기본값)</span>:</span>
+                            <button
+                              onClick={() => setObjectMappings(prev => ({
+                                ...prev,
+                                quote: { ...prev.quote, isMainQuote: !prev.quote.isMainQuote },
+                              }))}
+                              className="flex items-center gap-1"
+                            >
+                              <div className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${objectMappings.quote.isMainQuote !== false ? 'bg-[#FF8400]' : 'bg-[#CBCCC9]'}`}>
+                                <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${objectMappings.quote.isMainQuote !== false ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {/* 필드 매핑 테이블 */}
                 <div className="flex flex-1 flex-col overflow-hidden rounded border border-[#CBCCC9] bg-white">
                   {/* 테이블 헤더 */}
-                  <div className="grid grid-cols-[minmax(180px,1fr)_100px_minmax(280px,1.5fr)] items-center border-b border-[#CBCCC9] bg-[#F2F3F0] px-4 py-3">
+                  <div className="grid grid-cols-[minmax(200px,1.2fr)_80px_minmax(280px,1.5fr)] items-center border-b border-[#CBCCC9] bg-[#F2F3F0] px-4 py-3">
                     <span className="font-primary text-sm font-semibold text-[#111111]">파일 컬럼</span>
                     <span className="font-primary text-sm font-semibold text-[#666666]">샘플</span>
                     <div className="flex items-center justify-between">
@@ -1382,19 +1628,23 @@ export function DirectImport() {
                     {uploadedFile?.columns.map((col, rowIdx) => {
                       const sampleValue = fileData[0]?.[col] ? String(fileData[0][col]).substring(0, 20) : '-';
 
-                      // 현재 매핑 상태 확인 (모든 오브젝트에서)
-                      let currentMappingKey = '';
-                      let currentObjectType: ObjectType | null = null;
+                      // 현재 매핑 상태 확인 (모든 오브젝트에서 — 복수 매핑 지원)
+                      const allMappings: { objectType: ObjectType; objectName: string; fieldKey: string; fieldName: string }[] = [];
                       for (const config of enabledObjects) {
                         const fieldKey = objectMappings[config.id].columnMappings[col];
                         if (fieldKey) {
-                          currentMappingKey = `${config.id}.${fieldKey}`;
-                          currentObjectType = config.id;
-                          break;
+                          const fieldDef = salesmapFields[config.id].find(f => f.key === fieldKey);
+                          allMappings.push({
+                            objectType: config.id,
+                            objectName: config.name,
+                            fieldKey,
+                            fieldName: fieldDef?.name || fieldKey,
+                          });
                         }
                       }
 
-                      const isMapped = !!currentMappingKey;
+                      const isMapped = allMappings.length > 0;
+                      const selectedValues = allMappings.map(m => `${m.objectType}.${m.fieldKey}`);
 
                       // SearchableSelect용 그룹화된 옵션 생성
                       const groupedOptions: GroupedOption[] = enabledObjects.map(config => ({
@@ -1411,7 +1661,7 @@ export function DirectImport() {
                       return (
                         <div
                           key={col}
-                          className={`grid grid-cols-[minmax(180px,1fr)_100px_minmax(280px,1.5fr)] items-center px-4 py-2.5 ${
+                          className={`grid grid-cols-[minmax(200px,1.2fr)_80px_minmax(280px,1.5fr)] items-center px-4 py-2.5 ${
                             rowIdx !== (uploadedFile?.columns.length || 0) - 1 ? 'border-b border-[#CBCCC9]' : ''
                           } ${isMapped ? 'bg-[#FFF7ED]' : 'hover:bg-[#F2F3F0]'}`}
                         >
@@ -1438,24 +1688,45 @@ export function DirectImport() {
                             {sampleValue}
                           </span>
 
-                          {/* SearchableSelect 드롭다운 */}
-                          <SearchableSelect
-                            value={currentMappingKey}
-                            options={groupedOptions}
-                            onChange={(newValue) => {
-                              // 기존 매핑 제거
-                              if (currentObjectType) {
-                                handleMappingChange(currentObjectType, col, '');
-                              }
+                          {/* 매핑 필드: 칩 + 추가 드롭다운 */}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {/* 매핑된 필드 칩 */}
+                            {allMappings.map(m => (
+                              <span
+                                key={`${m.objectType}.${m.fieldKey}`}
+                                className="inline-flex items-center gap-1 rounded-full border border-[#FF8400] bg-[#FFF7ED] px-2.5 py-1 font-secondary text-xs font-medium text-[#111111]"
+                              >
+                                <span className="text-[#FF8400]">[{m.objectName}]</span>
+                                {m.fieldName}
+                                <button
+                                  onClick={() => handleMappingChange(m.objectType, col, '')}
+                                  className="ml-0.5 text-[#666666] hover:text-[#ef4444] transition-colors"
+                                >
+                                  <span className="material-symbols-rounded" style={{ fontSize: 14 }}>close</span>
+                                </button>
+                              </span>
+                            ))}
 
-                              // 새 매핑 추가
-                              if (newValue) {
+                            {/* 추가 드롭다운 */}
+                            <SearchableSelect
+                              value=""
+                              options={groupedOptions}
+                              selectedValues={selectedValues}
+                              onChange={(newValue) => {
+                                if (!newValue) return;
                                 const [objType, fieldKey] = newValue.split('.');
-                                handleMappingChange(objType as ObjectType, col, fieldKey);
-                              }
-                            }}
-                            placeholder="필드 선택"
-                          />
+                                const alreadyMapped = selectedValues.includes(newValue);
+                                if (alreadyMapped) {
+                                  // 토글: 이미 매핑된 값 클릭 → 제거
+                                  handleMappingChange(objType as ObjectType, col, '');
+                                } else {
+                                  // 새 매핑 추가
+                                  handleMappingChange(objType as ObjectType, col, fieldKey);
+                                }
+                              }}
+                              placeholder={isMapped ? '+ 추가' : '필드 선택'}
+                            />
+                          </div>
                         </div>
                       );
                     })}
@@ -1500,6 +1771,22 @@ export function DirectImport() {
                     })}
                   </div>
                 </div>
+
+                {/* 구독 상품 안내 (결제횟수/시작결제일 매핑 시) */}
+                {objectMappings.quote.enabled && (() => {
+                  const quoteMappedKeys = Object.values(objectMappings.quote.columnMappings);
+                  const hasPaymentCount = quoteMappedKeys.includes('__paymentCount');
+                  const hasPaymentStartAt = quoteMappedKeys.includes('__paymentStartAt');
+                  if (!hasPaymentCount && !hasPaymentStartAt) return null;
+                  return (
+                    <div className="flex items-center gap-3 rounded-lg border border-[#3b82f6] bg-[#eff6ff] px-4 py-3">
+                      <span className="material-symbols-rounded text-[#3b82f6]" style={{ fontSize: 18 }}>info</span>
+                      <span className="font-secondary text-sm text-[#1e40af]">
+                        결제횟수 / 시작결제일은 <strong>구독 상품</strong>인 경우에만 필수입니다. 일반 상품이면 매핑하지 않아도 됩니다.
+                      </span>
+                    </div>
+                  );
+                })()}
               </>
             )}
           </div>
@@ -1560,6 +1847,15 @@ export function DirectImport() {
                           </span>
                           <span className="font-primary text-lg font-bold text-[#3b82f6]">{result.updated}</span>
                           <span className="font-secondary text-sm text-[#666666]">업데이트</span>
+                        </div>
+                      )}
+                      {result.skipped > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="material-symbols-rounded text-[#8b5cf6]" style={{ fontSize: 20 }}>
+                            skip_next
+                          </span>
+                          <span className="font-primary text-lg font-bold text-[#8b5cf6]">{result.skipped}</span>
+                          <span className="font-secondary text-sm text-[#666666]">기존 사용</span>
                         </div>
                       )}
                       {result.failed > 0 && (
