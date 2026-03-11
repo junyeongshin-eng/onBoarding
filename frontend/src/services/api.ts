@@ -1,0 +1,887 @@
+import type {
+  UploadResponse, ObjectType, ObjectFieldsResponse, ImportRequest, ImportResponse,
+  ValidationResult, AutoMapResponse, DuplicateDetectionResponse, FieldMapping,
+  ApiKeyValidationResponse, FetchFieldsResponse,
+  // Wrapper 아키텍처 타입
+  TriageRequest, TriageResponse, MappingRequest, MappingResponse,
+  ExportResponse, AnalyzeResponse,
+  TriageColumnKeep, SalesmapObjectType, SalesmapField, MappingFieldMapping,
+} from '../types';
+
+// In development, Vite proxy handles /api -> localhost:8000
+// In production, use the VITE_API_URL environment variable
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
+export async function uploadFile(file: File): Promise<UploadResponse & { data: Record<string, unknown>[] }> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+  } catch (e) {
+    throw new Error('서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인하세요.');
+  }
+
+  if (!response.ok) {
+    let errorMessage = '업로드 실패';
+    const text = await response.text();
+    if (text) {
+      try {
+        const error = JSON.parse(text);
+        errorMessage = error.detail || errorMessage;
+      } catch {
+        errorMessage = text || '업로드 실패: 서버 오류가 발생했습니다';
+      }
+    }
+    throw new Error(errorMessage);
+  }
+
+  const responseText = await response.text();
+  if (!responseText) {
+    throw new Error('서버에서 빈 응답을 받았습니다');
+  }
+
+  try {
+    return JSON.parse(responseText);
+  } catch {
+    throw new Error('서버 응답을 파싱할 수 없습니다');
+  }
+}
+
+export async function getObjectTypes(): Promise<ObjectType[]> {
+  const response = await fetch(`${API_BASE}/object-types`);
+  const data = await response.json();
+  return data.object_types;
+}
+
+export async function getCRMFields(objectType: string): Promise<ObjectFieldsResponse> {
+  const response = await fetch(`${API_BASE}/crm-fields/${objectType}`);
+  if (!response.ok) {
+    throw new Error('필드 정보를 가져올 수 없습니다');
+  }
+  return response.json();
+}
+
+export async function validateImport(request: ImportRequest): Promise<ValidationResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/import/validate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+  } catch (e) {
+    throw new Error('서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인하세요.');
+  }
+
+  if (!response.ok) {
+    let errorMessage = '검증 실패';
+    const text = await response.text();
+    if (text) {
+      try {
+        const error = JSON.parse(text);
+        errorMessage = error.detail || errorMessage;
+      } catch {
+        errorMessage = text || '검증 실패: 서버 오류가 발생했습니다';
+      }
+    }
+    throw new Error(errorMessage);
+  }
+
+  const responseText = await response.text();
+  if (!responseText) {
+    throw new Error('서버에서 빈 응답을 받았습니다');
+  }
+
+  try {
+    return JSON.parse(responseText) as ValidationResult;
+  } catch {
+    throw new Error('서버 응답을 파싱할 수 없습니다');
+  }
+}
+
+export async function importData(request: ImportRequest, validRowIndices?: number[]): Promise<ImportResponse> {
+  // Filter data if validRowIndices is provided
+  const filteredRequest = validRowIndices
+    ? { ...request, data: request.data.filter((_, idx) => validRowIndices.includes(idx)) }
+    : request;
+  // Generate and download the Excel file
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/import`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(filteredRequest),
+    });
+  } catch (e) {
+    throw new Error('파일 생성 중 서버 연결 오류가 발생했습니다');
+  }
+
+  if (!response.ok) {
+    let errorMessage = '파일 생성 실패';
+    const text = await response.text();
+    if (text) {
+      try {
+        const error = JSON.parse(text);
+        errorMessage = error.detail || errorMessage;
+      } catch {
+        errorMessage = text || '파일 생성 실패: 서버 오류가 발생했습니다';
+      }
+    }
+    throw new Error(errorMessage);
+  }
+
+  // Download the file
+  const blob = await response.blob();
+  const contentDisposition = response.headers.get('Content-Disposition');
+  let filename = 'salesmap_import.xlsx';
+
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename="(.+)"/);
+    if (match) {
+      filename = match[1];
+    }
+  }
+
+  // Create download link
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+
+  return {
+    success: true,
+    imported_count: filteredRequest.data.length,
+    errors: [],
+  };
+}
+
+export interface AvailableField {
+  key: string;
+  id: string;
+  label: string;
+  object_type: string;
+  description?: string;
+}
+
+export async function autoMapFields(
+  sourceColumns: string[],
+  sampleData: Record<string, unknown>[],
+  targetObjectTypes: string[],
+  availableFields?: AvailableField[]
+): Promise<AutoMapResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/import/auto-map`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        source_columns: sourceColumns,
+        sample_data: sampleData,
+        target_object_types: targetObjectTypes,
+        available_fields: availableFields,
+      }),
+    });
+  } catch (e) {
+    throw new Error('AI 자동 매핑 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('AI 자동 매핑 실패');
+  }
+
+  return response.json();
+}
+
+export async function detectDuplicates(
+  data: Record<string, unknown>[],
+  fieldMappings: FieldMapping[],
+  useAi: boolean = false,
+  threshold: number = 0.85
+): Promise<DuplicateDetectionResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/import/detect-duplicates`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data,
+        field_mappings: fieldMappings,
+        use_ai: useAi,
+        threshold,
+      }),
+    });
+  } catch (e) {
+    throw new Error('중복 감지 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('중복 감지 실패');
+  }
+
+  return response.json();
+}
+
+// Salesmap API Integration
+export async function validateSalesmapApiKey(apiKey: string): Promise<ApiKeyValidationResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/salesmap/validate-key`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+  } catch (e) {
+    throw new Error('서버에 연결할 수 없습니다');
+  }
+
+  if (!response.ok) {
+    throw new Error('API 키 검증 실패');
+  }
+
+  return response.json();
+}
+
+export async function fetchSalesmapFields(
+  apiKey: string,
+  objectTypes: string[]
+): Promise<FetchFieldsResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/salesmap/fetch-fields`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        api_key: apiKey,
+        object_types: objectTypes,
+      }),
+    });
+  } catch (e) {
+    throw new Error('필드 조회 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('필드 조회 실패');
+  }
+
+  return response.json();
+}
+
+// AI Consulting Chat
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface FileContext {
+  filename: string;
+  columns: string[];
+  sample_data: Record<string, unknown>[];
+  total_rows: number;
+}
+
+export interface ConsultingChatResponse {
+  type: 'message' | 'summary' | 'error';
+  content?: string;
+  data?: {
+    summary: string;
+    recommended_objects: string[];
+    recommended_fields: Array<{
+      object_type: string;
+      field_id: string;
+      field_label: string;
+      reason: string;
+    }>;
+    confirmation_message: string;
+  };
+}
+
+export async function consultingChat(
+  messages: ChatMessage[],
+  isSummaryRequest: boolean = false,
+  fileContext?: FileContext
+): Promise<ConsultingChatResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/consulting/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages,
+        is_summary_request: isSummaryRequest,
+        file_context: fileContext,
+      }),
+    });
+  } catch (e) {
+    throw new Error('AI 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('AI 응답 실패');
+  }
+
+  return response.json();
+}
+
+// ============================================================================
+// Wrapper 아키텍처 API (Triage, Mapping, Export)
+// ============================================================================
+
+/**
+ * 파일 분석 API
+ * 컬럼 통계 및 제외 후보 식별
+ */
+export async function analyzeFile(
+  data: Record<string, unknown>[],
+  sampleCount: number = 5
+): Promise<AnalyzeResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/ai/analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data,
+        sample_count: sampleCount,
+      }),
+    });
+  } catch (e) {
+    throw new Error('파일 분석 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('파일 분석 실패');
+  }
+
+  return response.json();
+}
+
+/**
+ * Triage API
+ * 컬럼 분류 (유지/제외)
+ */
+export async function triageColumns(
+  columns: string[],
+  sampleData: Record<string, unknown>[],
+  businessContext?: string
+): Promise<TriageResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/ai/triage`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        columns,
+        sample_data: sampleData,
+        business_context: businessContext,
+      } as TriageRequest),
+    });
+  } catch (e) {
+    throw new Error('컬럼 분류 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('컬럼 분류 실패');
+  }
+
+  return response.json();
+}
+
+/**
+ * Mapping API
+ * 필드 매핑
+ */
+export async function mapFields(
+  columnsToKeep: TriageColumnKeep[],
+  objectTypes: SalesmapObjectType[],
+  availableFields: Record<string, SalesmapField[]>,
+  sampleData: Record<string, unknown>[]
+): Promise<MappingResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/ai/map`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        columns_to_keep: columnsToKeep,
+        object_types: objectTypes,
+        available_fields: availableFields,
+        sample_data: sampleData,
+      } as MappingRequest),
+    });
+  } catch (e) {
+    throw new Error('필드 매핑 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('필드 매핑 실패');
+  }
+
+  return response.json();
+}
+
+/**
+ * Export API
+ * 데이터 내보내기
+ */
+export async function exportData(
+  data: Record<string, unknown>[],
+  mappings: MappingFieldMapping[],
+  objectTypes: SalesmapObjectType[],
+  format: 'xlsx' | 'csv' = 'xlsx',
+  includeSummary: boolean = true
+): Promise<ExportResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/export`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data,
+        mappings,
+        object_types: objectTypes,
+        format,
+        include_summary: includeSummary,
+      }),
+    });
+  } catch (e) {
+    throw new Error('내보내기 서버 연결 오류');
+  }
+
+  if (!response.ok) {
+    throw new Error('내보내기 실패');
+  }
+
+  return response.json();
+}
+
+/**
+ * 파일 다운로드
+ */
+export async function downloadExport(downloadUrl: string): Promise<void> {
+  const response = await fetch(`${API_BASE}${downloadUrl}`);
+
+  if (!response.ok) {
+    throw new Error('파일 다운로드 실패');
+  }
+
+  const blob = await response.blob();
+  const contentDisposition = response.headers.get('Content-Disposition');
+  let filename = 'salesmap_export.xlsx';
+
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename="(.+)"/);
+    if (match) {
+      filename = match[1];
+    }
+  }
+
+  // Create download link
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
+// 파이프라인 조회
+export interface PipelineStage {
+  id: string;
+  name: string;
+  index: number;
+  description?: string;
+}
+
+export interface Pipeline {
+  id: string;
+  name: string;
+  pipelineStageList: PipelineStage[];
+}
+
+export interface FetchPipelinesResponse {
+  success: boolean;
+  pipelineList: Pipeline[];
+  message?: string;
+}
+
+export async function fetchPipelines(
+  apiKey: string,
+  objectType: string
+): Promise<FetchPipelinesResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/salesmap/pipelines`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey, object_type: objectType }),
+    });
+
+    if (!response.ok) {
+      throw new Error('파이프라인 조회 실패');
+    }
+
+    return response.json();
+  } catch (e) {
+    return { success: false, pipelineList: [], message: '파이프라인 조회 서버 연결 오류' };
+  }
+}
+
+// 사용자 목록 조회
+export interface SalesmapUser {
+  id: string;
+  name: string;
+}
+
+export interface FetchUsersResponse {
+  success: boolean;
+  userList: SalesmapUser[];
+  message?: string;
+}
+
+export async function fetchUsers(apiKey: string): Promise<FetchUsersResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/salesmap/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+
+    if (!response.ok) {
+      throw new Error('사용자 목록 조회 실패');
+    }
+
+    return response.json();
+  } catch (e) {
+    return { success: false, userList: [], message: '사용자 목록 조회 서버 연결 오류' };
+  }
+}
+
+// 상품 조회
+export interface SalesmapProduct {
+  id: string;
+  name: string;
+  price: number;
+}
+
+export interface FetchProductsResponse {
+  success: boolean;
+  productList: SalesmapProduct[];
+  error?: string;
+}
+
+export async function fetchProducts(apiKey: string): Promise<FetchProductsResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/salesmap/products`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+
+    if (!response.ok) {
+      throw new Error('상품 목록 조회 실패');
+    }
+
+    return response.json();
+  } catch (e) {
+    return { success: false, productList: [], error: '상품 목록 조회 서버 연결 오류' };
+  }
+}
+
+// AI 필드 매칭 요청
+export interface FieldMatchRequest {
+  error_columns: string[];
+  available_fields: Record<string, string[]>;
+}
+
+export interface FieldMatchResponse {
+  success: boolean;
+  mappings: Record<string, string>;
+  error?: string;
+}
+
+export async function matchFieldsWithAI(request: FieldMatchRequest): Promise<FieldMatchResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/ai/match-fields`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      return { success: false, mappings: {}, error: error.detail || 'AI 매칭 실패' };
+    }
+
+    return await response.json();
+  } catch (e) {
+    return { success: false, mappings: {}, error: 'AI 서버 연결 실패' };
+  }
+}
+
+// ============================================================================
+// Import Session (Admin 로깅용)
+// ============================================================================
+
+export async function startImportSession(
+  filename: string,
+  totalRows: number,
+  objectTypes: string[],
+): Promise<{ session_id: string }> {
+  const response = await fetch(`${API_BASE}/salesmap/session/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, total_rows: totalRows, object_types: objectTypes }),
+  });
+  return response.json();
+}
+
+export async function endImportSession(
+  sessionId: string,
+): Promise<{ success: boolean; summary?: Record<string, unknown> }> {
+  const response = await fetch(`${API_BASE}/salesmap/session/${sessionId}/end`, {
+    method: 'POST',
+  });
+  return response.json();
+}
+
+// ============================================================================
+// Admin API
+// ============================================================================
+
+export async function adminLogin(password: string): Promise<{ success: boolean; message?: string }> {
+  const response = await fetch(`${API_BASE}/admin/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  return response.json();
+}
+
+export async function getAdminSessions(password: string): Promise<{ sessions: AdminSession[] }> {
+  const response = await fetch(`${API_BASE}/admin/sessions`, {
+    headers: { 'X-Admin-Password': password },
+  });
+  if (!response.ok) throw new Error('인증 실패');
+  return response.json();
+}
+
+export async function getAdminSessionDetail(password: string, sessionId: string): Promise<AdminSessionDetail> {
+  const response = await fetch(`${API_BASE}/admin/sessions/${sessionId}`, {
+    headers: { 'X-Admin-Password': password },
+  });
+  if (!response.ok) throw new Error('인증 실패');
+  return response.json();
+}
+
+export interface AdminSession {
+  id: string;
+  filename: string;
+  total_rows: number;
+  object_types: string[];
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  summary: {
+    total_requests: number;
+    success: number;
+    created?: number;
+    updated?: number;
+    failed: number;
+    by_type: Record<string, { created?: number; updated?: number; failed: number; success?: number }>;
+  } | null;
+}
+
+export interface AdminRowResult {
+  row_index: number;
+  object_type: string;
+  request: Record<string, unknown>;
+  response: Record<string, unknown>;
+  success: boolean;
+  error: string | null;
+  action?: string;
+  timestamp: string;
+}
+
+export interface AdminSessionDetail extends AdminSession {
+  results: AdminRowResult[];
+}
+
+// ============================================================================
+// Bulk Import SSE
+// ============================================================================
+
+export interface BulkImportRequest {
+  api_key: string;
+  upsert_enabled: boolean;
+  active_objects: string[];
+  product_cache: Array<{ id: string; name: string; price: number }>;
+  quote_connection: string;
+  rows: Array<Record<string, any>>;
+  filename: string;
+  total_rows: number;
+}
+
+export interface BulkImportProgressEvent {
+  completed: number;
+  total: number;
+  percent: number;
+}
+
+export interface BulkImportCompleteEvent {
+  results: Record<string, {
+    success: number;
+    updated: number;
+    failed: number;
+    skipped: number;
+    errors: Array<{ row: number; message: string }>;
+  }>;
+}
+
+export interface BulkImportHandlers {
+  onProgress: (data: BulkImportProgressEvent) => void;
+  onComplete: (data: BulkImportCompleteEvent) => void;
+  onError: (data: { message: string }) => void;
+}
+
+export async function startBulkImport(
+  request: BulkImportRequest,
+  handlers: BulkImportHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/salesmap/bulk-import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Bulk import request failed: ${response.status}`);
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE events from buffer
+      const lines = buffer.split('\n');
+      buffer = '';
+
+      let currentEvent = '';
+      let currentData = '';
+
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+          currentData = line.slice(6).trim();
+        } else if (line === '' && currentEvent && currentData) {
+          // End of event block
+          try {
+            const parsed = JSON.parse(currentData);
+            if (currentEvent === 'progress') {
+              handlers.onProgress(parsed);
+            } else if (currentEvent === 'complete') {
+              handlers.onComplete(parsed);
+            } else if (currentEvent === 'error') {
+              handlers.onError(parsed);
+            }
+          } catch (e) {
+            console.error('SSE parse error:', e);
+          }
+          currentEvent = '';
+          currentData = '';
+        } else if (line !== '') {
+          // Incomplete line, put back in buffer
+          buffer = line;
+        }
+      }
+    }
+  } catch (e) {
+    if (signal?.aborted) return;
+    throw e;
+  }
+}
+
+// Salesmap Direct Import - AI Auto Mapping
+export interface SalesmapAutoMappingRequest {
+  columns: string[];
+  sample_data: Record<string, unknown>[];
+  available_fields: Record<string, Array<{ id: string; label?: string; name?: string; required?: boolean }>>;
+  enabled_objects: string[];
+}
+
+export interface SalesmapFieldMapping {
+  column: string;
+  object_type: string | null;
+  field_key: string | null;
+  field_name: string | null;
+  confidence: number;
+  reason: string | null;
+}
+
+export interface SalesmapAutoMappingResponse {
+  success: boolean;
+  mappings: SalesmapFieldMapping[];
+  error?: string;
+}
+
+export async function salesmapAutoMapping(
+  request: SalesmapAutoMappingRequest
+): Promise<SalesmapAutoMappingResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/salesmap/auto-mapping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      return { success: false, mappings: [], error: error.detail || 'AI 자동 매핑 실패' };
+    }
+
+    return await response.json();
+  } catch (e) {
+    return { success: false, mappings: [], error: 'AI 서버 연결 실패' };
+  }
+}

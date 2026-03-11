@@ -1,0 +1,119 @@
+[
+  {
+    "id": "1d21f18acf70",
+    "filename": "테스트하기 딱이야.xlsx",
+    "total_rows": 1,
+    "object_types": [
+      "organization",
+      "people",
+      "deal"
+    ],
+    "status": "completed",
+    "started_at": "2026-02-24T04:44:12.243290+00:00",
+    "ended_at": "2026-02-24T04:44:12.845117+00:00",
+    "results": [
+      {
+        "row_index": 0,
+        "object_type": "organization",
+        "request": {
+          "name": "광림당전당포대부",
+          "fieldList": [
+            {
+              "name": "전화",
+              "stringValue": "031-396-4494"
+            },
+            {
+              "name": "주소",
+              "stringValue": "경기도 군포시 산본로323번길 16-15, 305호 산본동,광림프라자"
+            }
+          ]
+        },
+        "response": {
+          "success": true,
+          "data": {
+            "organization": {
+              "id": "019c8df6-42f2-7cc5-b9d7-d565116ecf72",
+              "name": "광림당전당포대부",
+              "createdAt": "2026-02-24T04:44:12.402Z"
+            }
+          }
+        },
+        "success": true,
+        "error": null,
+        "timestamp": "2026-02-24T04:44:12.374382+00:00"
+      },
+      {
+        "row_index": 0,
+        "object_type": "people",
+        "request": {
+          "name": "광림당전당포대부",
+          "organizationId": "019c8df6-42f2-7cc5-b9d7-d565116ecf72"
+        },
+        "response": {
+          "success": true,
+          "data": {
+            "people": {
+              "id": "019c8df6-4386-7eed-aa35-b524e9b73201",
+              "name": "광림당전당포대부",
+              "createdAt": "2026-02-24T04:44:12.550Z"
+            }
+          }
+        },
+        "success": true,
+        "error": null,
+        "timestamp": "2026-02-24T04:44:12.534280+00:00"
+      },
+      {
+        "row_index": 0,
+        "object_type": "deal",
+        "request": {
+          "memo": "ㅎㅇㅎㅇㅎㅇㅎㅇ",
+          "name": "세일즈 파이프라인",
+          "fieldList": [
+            {
+              "name": "생성 날짜",
+              "dateValue": "2026-02-12T00:00:00.000Z"
+            }
+          ],
+          "organizationId": "019c8df6-42f2-7cc5-b9d7-d565116ecf72",
+          "peopleId": "019c8df6-4386-7eed-aa35-b524e9b73201",
+          "status": "In progress",
+          "pipelineId": "334928d9-421b-4014-958a-ae777ddb9606",
+          "pipelineStageId": "ecd04bd3-6e76-4dba-b4ce-fb5c7732842a"
+        },
+        "response": {
+          "success": true,
+          "data": {
+            "deal": {
+              "id": "019c8df6-442c-7555-b2dc-0af92390a7a3",
+              "name": "세일즈 파이프라인",
+              "createdAt": "2026-02-24T04:44:12.717Z"
+            }
+          }
+        },
+        "success": true,
+        "error": null,
+        "timestamp": "2026-02-24T04:44:12.836052+00:00"
+      }
+    ],
+    "summary": {
+      "total_requests": 3,
+      "success": 3,
+      "failed": 0,
+      "by_type": {
+        "organization": {
+          "success": 1,
+          "failed": 0
+        },
+        "people": {
+          "success": 1,
+          "failed": 0
+        },
+        "deal": {
+          "success": 1,
+          "failed": 0
+        }
+      }
+    }
+  }
+]
